@@ -113,15 +113,17 @@ class LiveDataConnector:
         return decision
 
     def _record_action(self, decision: LiveDecision) -> None:
-        self.action_history.append(
-            {
-                "timestamp": decision.snapshot.timestamp,
-                "decision": decision.current_action,
-                "reason": decision.reason,
-                "next_action": decision.next_action,
-                "confidence": decision.confidence,
-            }
-        )
+        entry = _timeline_entry(decision)
+        last = self.action_history[-1] if self.action_history else None
+        if last and not _should_append_timeline_entry(last, entry):
+            last["last_seen"] = entry["timestamp"]
+            last["repeat_count"] = int(last.get("repeat_count") or 1) + 1
+            last["confidence"] = entry["confidence"]
+            last["current_live_score"] = entry["current_live_score"]
+            decision.timeline = list(reversed(self.action_history))
+            return
+
+        self.action_history.append(entry)
         self.action_history = self.action_history[-10:]
         decision.timeline = list(reversed(self.action_history))
 
@@ -320,6 +322,77 @@ _TREND_FIELDS = [
     "item_add_cart_rate",
     "item_gmv",
 ]
+
+_TIMELINE_TREND_FIELDS = [
+    "online_uv",
+    "stay_time_pu",
+    "heat_score",
+    "ipv_uv_rate",
+    "pay_byr_rate",
+    "comment_uv",
+    "pay_amt_5min_d_live",
+    "item_click_rate",
+    "item_conversion_rate",
+    "item_add_cart_rate",
+]
+
+
+def _timeline_entry(decision: LiveDecision) -> dict[str, Any]:
+    trend_signature = _timeline_trend_signature(decision.trend_30s, decision.trend_60s)
+    return {
+        "timestamp": decision.snapshot.timestamp,
+        "last_seen": decision.snapshot.timestamp,
+        "decision": decision.current_action,
+        "mode": decision.livestream_mode,
+        "reason": decision.reason,
+        "next_action": decision.next_action,
+        "confidence": decision.confidence,
+        "current_live_score": decision.current_live_score,
+        "trend_signature": trend_signature,
+        "repeat_count": 1,
+        "event_type": _timeline_event_type(decision.current_action, decision.livestream_mode, trend_signature),
+    }
+
+
+def _should_append_timeline_entry(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    if previous.get("decision") != current.get("decision"):
+        return True
+    if previous.get("mode") != current.get("mode"):
+        return True
+    if abs(float(previous.get("confidence") or 0) - float(current.get("confidence") or 0)) >= 0.08:
+        return True
+    if previous.get("trend_signature") != current.get("trend_signature") and _has_major_trend(current.get("trend_signature")):
+        return True
+    return False
+
+
+def _timeline_trend_signature(trend_30s: dict[str, str], trend_60s: dict[str, str]) -> tuple[tuple[str, str, str], ...]:
+    signature = []
+    for field in _TIMELINE_TREND_FIELDS:
+        direction_30 = trend_30s.get(field, "stable")
+        direction_60 = trend_60s.get(field, "stable")
+        if direction_30 != "stable" or direction_60 != "stable":
+            signature.append((field, direction_30, direction_60))
+    return tuple(signature)
+
+
+def _has_major_trend(signature: Any) -> bool:
+    return any(
+        direction in {"up", "down"}
+        for item in (signature or [])
+        for direction in item[1:]
+    )
+
+
+def _timeline_event_type(decision: str, mode: str, signature: tuple[tuple[str, str, str], ...]) -> str:
+    decision_text = decision.lower()
+    if "switch" in decision_text or mode == "Rescue mode":
+        return "danger"
+    if "push" in decision_text or any(field == "pay_amt_5min_d_live" and "up" in item for item in signature for field in item[:1]):
+        return "positive"
+    if "explain" in decision_text or "show" in decision_text:
+        return "warning"
+    return "stable"
 
 
 def _unwrap_payload(payload: Any) -> dict[str, Any]:

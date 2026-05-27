@@ -1562,6 +1562,19 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         return "";
       }
 
+      function timelineMarker(item) {
+        if (item.event_type === "positive") {
+          return "🟢";
+        }
+        if (item.event_type === "danger") {
+          return "🔴";
+        }
+        if (item.event_type === "warning") {
+          return "🟡";
+        }
+        return "⚪";
+      }
+
       function renderDirectorTimeline(items) {
         const node = document.getElementById("director-timeline");
         if (!items || !items.length) {
@@ -1570,11 +1583,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
         node.innerHTML = items.slice(0, 10).map(function(item) {
           const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
-          const tone = timelineTone(item.decision);
-          const marker = tone === "danger" ? "🔴" : tone === "warn" ? "🟡" : "🟢";
+          const tone = item.event_type === "danger" ? "danger" : item.event_type === "warning" ? "warn" : "";
+          const marker = timelineMarker(item);
+          const repeat = item.repeat_count && item.repeat_count > 1 ? " · stable x" + item.repeat_count : "";
+          const mode = item.mode ? " · " + item.mode : "";
           return '<div class="timeline-item ' + tone + '">'
             + '<span>' + escapeHtml(time) + '</span>'
-            + '<b>' + marker + ' ' + escapeHtml(item.decision || "--") + '</b>'
+            + '<b>' + marker + ' ' + escapeHtml(item.decision || "--") + escapeHtml(mode) + escapeHtml(repeat) + '</b>'
             + '<div>Reason: ' + escapeHtml((item.reason || []).join(" / ")) + '</div>'
             + '<div>Action: ' + escapeHtml(item.next_action || "--") + '</div>'
             + '<div>Confidence: ' + Math.round(toNumber(item.confidence) * 100) + '%</div>'
