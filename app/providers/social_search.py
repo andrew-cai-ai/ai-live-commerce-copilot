@@ -91,7 +91,12 @@ class RealSocialSearchProvider:
             if not title:
                 continue
             snippet = str(item.get("snippet") or "").strip()
+            if _is_bad_social_result(title, snippet, url):
+                continue
             metrics_text = f"{title} {snippet}"
+            top_comments = _extract_top_comments(snippet)
+            if self.platform_label == "小红书" and not top_comments:
+                continue
             posts.append(
                 SocialPost(
                     post_title=title,
@@ -102,7 +107,7 @@ class RealSocialSearchProvider:
                     cover_image=str(item.get("thumbnail") or ""),
                     real_url=url,
                     snippet=snippet,
-                    top_comments=_extract_top_comments(snippet),
+                    top_comments=top_comments,
                 )
             )
         return posts[:5]
@@ -113,6 +118,21 @@ def _is_allowed_url(url: str, allowed_domains: tuple[str, ...]) -> bool:
         return False
     host = urlparse(url).netloc.lower()
     return any(domain in host for domain in allowed_domains)
+
+
+def _is_bad_social_result(title: str, snippet: str, url: str) -> bool:
+    text = f"{title} {snippet}".lower()
+    parsed = urlparse(url)
+    path = parsed.path.lower().strip("/")
+    if "user/profile" in text or "user/profile" in path:
+        return True
+    if "no information is available" in text:
+        return True
+    if re.fullmatch(r"user/profile/[^/]+", path):
+        return True
+    if path in {"user", "profile", "user/profile"}:
+        return True
+    return False
 
 
 def _extract_metric(text: str, labels: tuple[str, ...]) -> int | None:

@@ -48,13 +48,17 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, list[str]]] = {
 
 def get_product_knowledge(product_name: str) -> ProductKnowledge:
     normalized = product_name.lower()
+    category_override = _category_override(product_name)
     matched_keyword = next((key for key in POPULARITY_KEYWORDS if key in normalized), None)
 
     popularity_score = POPULARITY_KEYWORDS.get(matched_keyword or "", 0.64)
-    category, similar = CATEGORY_KEYWORDS.get(
-        matched_keyword or "",
-        ("专业户外产品", ["同类防护款", "同类通勤款", "同类保暖款"]),
-    )
+    if category_override:
+        category, similar = category_override
+    else:
+        category, similar = CATEGORY_KEYWORDS.get(
+            matched_keyword or "",
+            ("专业户外产品", ["同类防护款", "同类通勤款", "同类保暖款"]),
+        )
 
     return ProductKnowledge(
         popularity_score=popularity_score,
@@ -76,3 +80,16 @@ def get_product_knowledge(product_name: str) -> ProductKnowledge:
             "正面、背面、上身图和瑕疵位置照片",
         ],
     )
+
+
+def _category_override(product_name: str) -> tuple[str, list[str]] | None:
+    normalized = product_name.lower()
+    if any(keyword in normalized for keyword in ["pant", "pants", "裤"]):
+        return ("软壳裤 / pants", ["同类软壳裤", "同类通勤裤", "同类户外裤"])
+    if any(keyword in normalized for keyword in ["shirt", "tee", " ss", " ls", "t-shirt", "t shirt"]):
+        return ("T恤 / tops", ["同类短袖", "同类长袖", "同类棉质上衣"])
+    if any(keyword in normalized for keyword in ["zip neck", "rho", "fleece", "抓绒"]):
+        return ("抓绒/保暖内搭", ["同类抓绒", "同类保暖内搭", "同类中间层"])
+    if any(keyword in normalized for keyword in ["shoe", "gtx", "kragg shoe", "norvan", "鞋"]):
+        return ("鞋", ["同类徒步鞋", "同类接近鞋", "同类越野鞋"])
+    return None

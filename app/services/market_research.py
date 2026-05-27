@@ -94,14 +94,14 @@ def _manual_price_results(override: ManualResearchOverride) -> list[PriceResult]
         ("竞品卖家", override.competitor_seller_price, "manual_competitor_seller_price"),
     ]
     return [
-        PriceResult(
-            title=f"{override.product_name} 手动调研价",
-            platform=platform,
-            price=round(price, 2),
-            currency="USD",
-            url="",
-            image_url="",
-            source=source,
+            PriceResult(
+                title=f"{override.product_name} 手动调研价",
+                platform=platform,
+                price=round(price, 2),
+                currency="CNY",
+                url="",
+                image_url="",
+                source=source,
             confidence=0.92,
         )
         for platform, price, source in rows

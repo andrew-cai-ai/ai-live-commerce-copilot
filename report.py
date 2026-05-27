@@ -387,7 +387,7 @@ def _fallback_product_report(product: ScoredProduct) -> dict[str, Any]:
     similar = knowledge.similar_products if knowledge else ["同类防护款", "同类通勤款", "同类保暖款"]
     category = knowledge.category if knowledge else "专业户外产品"
     margin_label = f"{product.profit_margin:.1%}"
-    market_label = _money(product.avg_competitor_price) if product.avg_competitor_price else "暂无平台均价"
+    market_label = _money(product.avg_competitor_price, "CNY") if product.avg_competitor_price else "暂无平台均价"
     heat_score = round(product.popularity_score * 100)
     recommendation_score = round(product.score * 100)
     concerns = [
@@ -542,15 +542,15 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         </div>
       </div>
       <div class="metrics">
-        {_metric("成本", _money(product.cost))}
-        {_metric("目标售价", _money(product.target_selling_price))}
-        {_metric("市场价差", _money(product.price_gap), "negative" if product.price_gap < 0 else "")}
+        {_metric("成本", _money(product.cost, "CNY"))}
+        {_metric("目标售价", _money(product.target_selling_price, "CNY"))}
+        {_metric("市场价差", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
         {_metric("库存", str(product.stock))}
         {_metric("平台热度", f"{product.popularity_score:.2f}")}
-        {_metric("市场低价", _money_or_na(product.min_competitor_price))}
-        {_metric("市场均价", _money_or_na(product.avg_competitor_price))}
-        {_metric("市场高价", _money_or_na(product.max_competitor_price))}
+        {_metric("市场低价", _money_or_na(product.min_competitor_price, "CNY"))}
+        {_metric("市场均价", _money_or_na(product.avg_competitor_price, "CNY"))}
+        {_metric("市场高价", _money_or_na(product.max_competitor_price, "CNY"))}
         {_metric("商品热度分", str(report["product_heat_score"]))}
         {_metric("推荐分", str(report["recommendation_score"]))}
         {_metric("转化适配", f"{product.sellability.score:.2f}")}
@@ -1434,7 +1434,7 @@ def _render_post_live_analysis(products: list[ScoredProduct]) -> str:
         <h2>Post-Live Analysis</h2>
         <div class="metrics">
           {_metric("Total viewers", f"{total_viewers:,}")}
-          {_metric("Estimated GMV", _money(estimated_gmv))}
+          {_metric("Estimated GMV", _money(estimated_gmv, "CNY"))}
           {_metric("Best product", best_product.product_name)}
           {_metric("Worst product", worst_product.product_name)}
         </div>
@@ -1705,7 +1705,7 @@ def _decision_label(decision: str) -> str:
     return labels.get(decision, "待判断")
 
 
-def _money_or_na(value: float | None, currency: str = "USD") -> str:
+def _money_or_na(value: float | None, currency: str = "CNY") -> str:
     return _money(value, currency) if value is not None else "N/A"
 
 
@@ -1713,7 +1713,7 @@ def _metric_or_na(value: int | None) -> str:
     return f"{value:,}" if value is not None else "Metrics unavailable"
 
 
-def _money(value: float | None, currency: str = "USD") -> str:
+def _money(value: float | None, currency: str = "CNY") -> str:
     if value is None:
         return "N/A"
     symbol = {"USD": "$", "CAD": "C$", "CNY": "¥"}.get(currency.upper(), f"{currency.upper()} ")
