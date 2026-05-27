@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: ai-live-commerce-copilot
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: SERPAPI_CACHE_TTL_SECONDS
+        value: "86400"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_SECRET
+        generateValue: true
