@@ -725,6 +725,7 @@ def _render_live_mode_dashboard() -> str:
           <div id="decision-card-reason">等待数据...</div>
           <div><b>Next sentence</b>: <span id="decision-card-sentence">--</span></div>
           <div><b>Current action</b>: <span id="decision-card-action">--</span></div>
+          <div><b>Confidence</b>: <span id="decision-card-confidence">--</span></div>
           <div><b>Recommended next product</b>: <span id="decision-card-next-product">--</span></div>
         </div>
         <div class="trend-grid">
@@ -1023,6 +1024,34 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         };
       }
 
+      function currentInputPayload() {
+        const realPayload = readAssistantPayload();
+        if (realPayload && realPayload.parse_error) {
+          document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + realPayload.error_message;
+          return null;
+        }
+        return realPayload || readManualLiveMetrics();
+      }
+
+      async function fetchLiveDecision() {
+        const response = await fetch("/api/live/decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            payload: currentInputPayload(),
+            products: liveProducts
+          })
+        });
+        if (!response.ok) {
+          throw new Error("Live decision API returned " + response.status);
+        }
+        const data = await response.json();
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        return data;
+      }
+
       function buildMetricsFromAssistantData(data) {
         const onlineUv = toNumber(data.online_uv);
         const pv = toNumber(data.pv);
@@ -1264,20 +1293,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         return "action-continue";
       }
 
-      function simulateLiveMetrics() {
-        const realPayload = readAssistantPayload();
-        if (realPayload && realPayload.parse_error) {
-          document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + realPayload.error_message;
+      async function simulateLiveMetrics() {
+        try {
+          const connectorDecision = await fetchLiveDecision();
+          renderConnectorDecision(connectorDecision);
           return;
-        }
-        if (realPayload) {
-          renderLiveDecision(buildMetricsFromAssistantData(realPayload));
-          return;
-        }
-        const manualPayload = readManualLiveMetrics();
-        if (manualPayload) {
-          renderLiveDecision(buildMetricsFromAssistantData(manualPayload));
-          return;
+        } catch (error) {
+          document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
         }
         const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
         const metrics = {
@@ -1325,6 +1347,121 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           1
         );
         renderLiveDecision(enrichMetrics(metrics));
+      }
+
+      function metricsFromConnector(snapshot) {
+        snapshot = snapshot || {};
+        const metrics = {
+          viewer_count: toNumber(snapshot.online_uv),
+          pv: 0,
+          uv: toNumber(snapshot.online_uv),
+          ctr: normalizeRate(snapshot.item_click_rate),
+          cvr: normalizeRate(snapshot.item_conversion_rate),
+          cart_rate: normalizeRate(snapshot.item_add_cart_rate),
+          watch_time: toNumber(snapshot.stay_time_pu),
+          pay_buyer_cnt: toNumber(snapshot.pay_buyer_cnt),
+          pay_item_qty: 0,
+          pay_amt: toNumber(snapshot.pay_amt),
+          heat_score_raw: 0,
+          heat_score: 0.5,
+          ipv_uv_rate: normalizeRate(snapshot.item_click_rate),
+          pay_byr_rate: normalizeRate(snapshot.item_conversion_rate),
+          comment_uv: toNumber(snapshot.authenticity_comments) + toNumber(snapshot.sizing_comments),
+          refund_amt: 0,
+          refund_amt_normalized: 0,
+          atn_uv: 0,
+          atn_uv_normalized: 0,
+          item_name: snapshot.current_product || "当前商品",
+          item_click_rate: normalizeRate(snapshot.item_click_rate),
+          item_conversion_rate: normalizeRate(snapshot.item_conversion_rate),
+          item_add_cart_rate: normalizeRate(snapshot.item_add_cart_rate),
+          item_gmv: toNumber(snapshot.item_gmv),
+          jiangJieEffect: 0,
+          authenticity_questions: toNumber(snapshot.authenticity_comments),
+          sizing_questions: toNumber(snapshot.sizing_comments),
+          source: snapshot.source || "real_api"
+        };
+        return enrichMetrics(metrics);
+      }
+
+      function serverTrendToCard(direction) {
+        if (direction === "up") {
+          return { label: "up ↑", className: "trend-up", direction: "up" };
+        }
+        if (direction === "down") {
+          return { label: "down ↓", className: "trend-down", direction: "down" };
+        }
+        return { label: "stable →", className: "trend-stable", direction: "stable" };
+      }
+
+      function trendsFromConnector(data) {
+        const trend30 = data.trend_30s || {};
+        const trend60 = data.trend_60s || {};
+        return {
+          ai30: serverTrendToCard(trend30.item_gmv || "stable"),
+          ai60: serverTrendToCard(trend60.item_gmv || "stable"),
+          click30: serverTrendToCard(trend30.item_click_rate || "stable"),
+          watch30: serverTrendToCard(trend30.stay_time_pu || "stable"),
+          cart30: serverTrendToCard(trend30.item_add_cart_rate || "stable"),
+          conv60: serverTrendToCard(trend60.item_conversion_rate || "stable"),
+          gmv60: serverTrendToCard(trend60.item_gmv || "stable")
+        };
+      }
+
+      function normalizeDecisionName(action) {
+        const text = String(action || "").toLowerCase();
+        if (text.includes("switch")) { return "Switch product"; }
+        if (text.includes("value")) { return "Explain value/price"; }
+        if (text.includes("authenticity")) { return "Show authenticity"; }
+        if (text.includes("sizing")) { return "Explain sizing"; }
+        if (text.includes("push")) { return "Push harder"; }
+        if (text.includes("skip")) { return "Skip product"; }
+        if (text.includes("topic")) { return "Change topic"; }
+        return "Continue product";
+      }
+
+      function renderConnectorDecision(data) {
+        const metrics = metricsFromConnector(data.snapshot);
+        const decisionName = normalizeDecisionName(data.current_action);
+        const decision = {
+          decision: decisionName,
+          reasons: (data.reason || []).slice(0, 3),
+          sentence: data.next_action || nextHostSentence(decisionName, metrics),
+          action: data.current_action || currentActionText(decisionName),
+          confidence: data.confidence || 0
+        };
+        const trends = trendsFromConnector(data);
+        const queue = buildRecommendedQueue(metrics, { decision: decisionName });
+
+        document.getElementById("live-status").textContent = (
+          data.source === "real_api"
+            ? "Using real live metrics API · updates every 5s"
+            : data.source === "page_payload"
+            ? "Using pasted/manual live payload via connector · updates every 5s"
+            : "Using mock connector data · configure LIVE_METRICS_API_URL for real API"
+        );
+        document.getElementById("viewer-count").textContent = Math.round(metrics.viewer_count).toLocaleString();
+        document.getElementById("ctr").textContent = formatPercent(metrics.item_click_rate);
+        document.getElementById("cvr").textContent = formatPercent(metrics.item_conversion_rate);
+        document.getElementById("cart-rate").textContent = formatPercent(metrics.item_add_cart_rate);
+        document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
+        document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
+        document.getElementById("ai-live-decision").textContent = decision.decision;
+        document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
+        document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
+        document.getElementById("live-jiangjie-effect").textContent = "--";
+        updateTrendCards(trends);
+        updateDecisionCard(decision, queue, data.recommended_next_product);
+        setActiveAction(chooseAction(decision.decision));
+        updateHostAssistant(metrics, decision);
+        updateRecommendedQueue(queue);
+
+        const suggestionList = document.getElementById("host-suggestions");
+        suggestionList.innerHTML = [
+          "Current action: " + decision.action,
+          "Next action: " + decision.sentence,
+          "Confidence: " + Math.round(decision.confidence * 100) + "%"
+        ].map(function(text) { return "<li>" + escapeHtml(text) + "</li>"; }).join("");
       }
 
       function renderLiveDecision(metrics) {
@@ -1448,12 +1585,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         });
       }
 
-      function updateDecisionCard(decision, queue) {
+      function updateDecisionCard(decision, queue, recommendedNextProduct) {
         document.getElementById("decision-card-decision").textContent = decision.decision;
         document.getElementById("decision-card-reason").textContent = decision.reasons.join(" / ");
         document.getElementById("decision-card-sentence").textContent = decision.sentence;
         document.getElementById("decision-card-action").textContent = decision.action;
-        document.getElementById("decision-card-next-product").textContent = queue[1] ? queue[1].product.name : "--";
+        document.getElementById("decision-card-confidence").textContent = decision.confidence ? Math.round(decision.confidence * 100) + "%" : "--";
+        document.getElementById("decision-card-next-product").textContent = recommendedNextProduct || (queue[1] ? queue[1].product.name : "--");
       }
 
       function updateRecommendedQueue(queue) {

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import html
 import time
+from dataclasses import asdict
+from typing import Any
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -15,11 +17,13 @@ from app.services.inventory_import import (
     parse_smart_inventory_file,
     smart_rows_to_inventory_text,
 )
+from app.services.live_data_connector import LiveDataConnector
 from app.services.report_history import get_report_path, list_reports, save_report
 from app.services.taobao_live_scoring import TaobaoLiveScoringService
 from scoring import parse_manual_research_overrides, score_products
 
 app = FastAPI(title="直播选品助手")
+live_data_connector = LiveDataConnector()
 
 EXAMPLE_INVENTORY = ""
 
@@ -104,6 +108,23 @@ def logout() -> RedirectResponse:
     response = RedirectResponse("/", status_code=303)
     clear_auth_cookie(response)
     return response
+
+
+@app.post("/api/live/decision")
+async def live_decision(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    decision = live_data_connector.get_decision(
+        payload=body.get("payload"),
+        products=body.get("products"),
+    )
+    return asdict(decision)
 
 
 @app.post("/analyze", response_class=HTMLResponse)
