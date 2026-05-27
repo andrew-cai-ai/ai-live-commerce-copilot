@@ -122,6 +122,8 @@ def render_report_page(
     .warning ul {{ margin-top: 6px; }}
     .grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }}
     .section {{ margin-top: 18px; }}
+    details.section {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fbfdfb; }}
+    details.section summary {{ cursor: pointer; font-weight: 900; color: var(--accent); }}
     .script-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
     .script-box {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }}
     .script-box h4 {{ margin: 0 0 8px; font-size: 14px; color: var(--accent); }}
@@ -131,6 +133,21 @@ def render_report_page(
     .live-head h2 {{ margin: 0; }}
     .live-status {{ color: var(--accent); background: var(--accent-soft); padding: 6px 10px; border-radius: 999px; font-weight: 900; }}
     .live-grid {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }}
+    .director-priority {{ display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); gap: 12px; margin-bottom: 12px; }}
+    .director-now {{ border: 2px solid var(--accent); border-radius: 8px; padding: 16px; background: #f3f8f5; }}
+    .director-now span, .health-card span, .timeline-item span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 900; }}
+    .director-now strong {{ display: block; font-size: 30px; color: var(--accent); line-height: 1.1; margin: 4px 0; }}
+    .director-sentence {{ font-size: 22px; font-weight: 900; margin-top: 8px; }}
+    .director-side {{ display: grid; grid-template-columns: 1fr; gap: 8px; }}
+    .health-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }}
+    .health-card {{ border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }}
+    .bar {{ height: 8px; background: #dbe4e0; border-radius: 999px; overflow: hidden; margin-top: 6px; }}
+    .bar i {{ display: block; height: 100%; width: 0%; background: var(--accent); }}
+    .timeline {{ display: grid; gap: 8px; margin-top: 10px; max-height: 360px; overflow-y: auto; }}
+    .timeline-item {{ border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px; background: #fff; }}
+    .timeline-item.warn {{ border-left-color: #b7791f; }}
+    .timeline-item.danger {{ border-left-color: #9f2f22; }}
+    .mode-pill {{ display: inline-flex; align-items: center; padding: 7px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 900; }}
     .live-metric {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }}
     .live-metric span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 800; }}
     .live-metric b {{ display: block; font-size: 22px; margin-top: 4px; }}
@@ -182,6 +199,7 @@ def render_report_page(
       header, .product-head {{ grid-template-columns: 1fr; display: grid; }}
       .score {{ text-align: left; }}
       .metrics, .grid, .order-grid, .live-grid, .action-grid {{ grid-template-columns: 1fr; }}
+      .director-priority, .health-grid {{ grid-template-columns: 1fr; }}
       .host-assistant {{ position: static; width: auto; max-height: none; margin-bottom: 18px; }}
     }}
   </style>
@@ -564,24 +582,17 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         <h3>Why AI ranked this product</h3>
         {_list(product.ranking_explanation)}
       </div>
-      <div class="section">
-        <h3>Market Price Evidence</h3>
-        {_market_price_table(product)}
-      </div>
-      <div class="section">
-        <h3>Social Heat Signals</h3>
-        {_social_heat_signals(product)}
-      </div>
-      <div class="section">
-        <h3>AI Livestream Script</h3>
-        {_ai_script(report)}
-      </div>
+      {_collapsed_section("Market Price Evidence", _market_price_table(product))}
+      {_collapsed_section("Social Heat Signals", _social_heat_signals(product))}
+      {_collapsed_section("AI Livestream Script", _ai_script(report))}
       <div class="section">
         <h3>Host Decision</h3>
         <span class="decision">{html.escape(report["host_decision"])}（{_decision_label(report["host_decision"])}）</span>
       </div>
       {_evidence_summary(product)}
       {_warning_list(product)}
+      <details class="section">
+        <summary>展开长分析：卖点、顾虑、对比、图片证据</summary>
       <div class="grid">
         <div>
           <h3>核心卖点</h3>
@@ -598,11 +609,16 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
           {_list(report["suggested_image_evidence"])}
         </div>
       </div>
+      </details>
     </section>"""
 
 
 def _metric(label: str, value: str, class_name: str = "") -> str:
     return f'<div class="metric"><span>{html.escape(label)}</span><b class="{class_name}">{html.escape(value)}</b></div>'
+
+
+def _collapsed_section(title: str, body: str) -> str:
+    return f'<details class="section"><summary>{html.escape(title)}</summary>{body}</details>'
 
 
 def _render_taobao_top_products(taobao_report: TaobaoTopProductsReport | None) -> str:
@@ -691,6 +707,55 @@ def _render_live_mode_dashboard() -> str:
         <div class="live-head">
           <h2>Live Director Mode</h2>
           <span class="live-status" id="live-status">Mock livestream simulator · updates every 5s</span>
+        </div>
+        <div class="director-priority">
+          <div class="director-now">
+            <span>Current action</span>
+            <strong id="director-current-action">等待数据...</strong>
+            <span>Next sentence</span>
+            <div class="director-sentence" id="director-next-sentence">--</div>
+            <div style="margin-top:10px;"><span>Reason</span><b id="director-reason">--</b></div>
+          </div>
+          <div class="director-side">
+            <div class="decision-card">
+              <span>Current mode</span>
+              <div class="mode-pill" id="director-mode">--</div>
+              <div><b>Recommended next product</b>: <span id="director-next-product">--</span></div>
+              <div><b>Confidence</b>: <span id="director-confidence">--</span></div>
+            </div>
+            <div class="decision-card">
+              <span>Switch recommendation</span>
+              <strong id="switch-recommendation">--</strong>
+              <div>Current expected GMV: <b id="current-expected-gmv">--</b></div>
+              <div>Recommended expected GMV: <b id="recommended-expected-gmv">--</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <span>Product Health Dashboard</span>
+          <strong id="health-product-name">--</strong>
+          <div class="health-grid">
+            <div class="health-card"><span>Heat</span><b id="health-heat">--</b><div class="bar"><i id="health-heat-bar"></i></div></div>
+            <div class="health-card"><span>Conversion</span><b id="health-conversion">--</b><div class="bar"><i id="health-conversion-bar"></i></div></div>
+            <div class="health-card"><span>Engagement</span><b id="health-engagement">--</b><div class="bar"><i id="health-engagement-bar"></i></div></div>
+            <div class="health-card"><span>Fatigue</span><b id="health-fatigue">--</b><div class="bar"><i id="health-fatigue-bar"></i></div></div>
+          </div>
+          <div id="health-status" style="margin-top:10px;">等待数据...</div>
+        </div>
+        <div class="decision-card">
+          <span>AI Director Timeline</span>
+          <div class="timeline" id="director-timeline">
+            <div class="timeline-item"><span>--</span>等待实时动作...</div>
+          </div>
+        </div>
+        <div class="decision-card">
+          <span>Viewer Comment Clustering</span>
+          <div id="comment-clusters">等待评论...</div>
+          <div><b>Suggested order</b>: <span id="comment-suggested-order">--</span></div>
+        </div>
+        <div class="decision-card">
+          <span>AI learned recommendations</span>
+          <ul id="learned-recommendations"><li>等待历史数据...</li></ul>
         </div>
         <div class="live-grid">
           <div class="live-metric"><span>Current viewers</span><b id="viewer-count">--</b></div>
@@ -1036,7 +1101,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + realPayload.error_message;
           return null;
         }
-        return realPayload || readManualLiveMetrics();
+        const payload = realPayload || readManualLiveMetrics() || {};
+        const commentsInput = document.getElementById("live-comments-input");
+        if (commentsInput && commentsInput.value.trim()) {
+          payload.viewer_comments = commentsInput.value;
+        }
+        return payload;
       }
 
       async function fetchLiveDecision() {
@@ -1435,6 +1505,83 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }).join("");
       }
 
+      function setBar(id, value) {
+        const textNode = document.getElementById(id);
+        const barNode = document.getElementById(id + "-bar");
+        const safeValue = Math.max(0, Math.min(100, Math.round(toNumber(value))));
+        if (textNode) {
+          textNode.textContent = safeValue;
+        }
+        if (barNode) {
+          barNode.style.width = safeValue + "%";
+        }
+      }
+
+      function renderProductHealth(health) {
+        health = health || {};
+        document.getElementById("health-product-name").textContent = health.product || "--";
+        setBar("health-heat", health.heat_score || 0);
+        setBar("health-conversion", health.conversion_score || 0);
+        setBar("health-engagement", health.engagement_score || 0);
+        setBar("health-fatigue", health.fatigue_score || 0);
+        document.getElementById("health-status").textContent = health.status || "等待数据...";
+      }
+
+      function renderSwitchRecommendation(recommendation) {
+        recommendation = recommendation || {};
+        document.getElementById("switch-recommendation").textContent = recommendation.recommendation || "--";
+        document.getElementById("current-expected-gmv").textContent = formatMoney(recommendation.current_expected_gmv || 0);
+        document.getElementById("recommended-expected-gmv").textContent = formatMoney(recommendation.recommended_expected_gmv || 0);
+      }
+
+      function renderCommentClusters(clusters) {
+        clusters = clusters || {};
+        const values = clusters.clusters || {};
+        const rows = Object.keys(values).map(function(key) {
+          return escapeHtml(key) + ": " + Math.round(toNumber(values[key])) + "%";
+        });
+        document.getElementById("comment-clusters").textContent = rows.length ? rows.join(" / ") : "暂无评论聚类";
+        document.getElementById("comment-suggested-order").textContent = (clusters.suggested_order || []).join(" → ") || "--";
+      }
+
+      function renderLearnedRecommendations(items) {
+        const node = document.getElementById("learned-recommendations");
+        node.innerHTML = (items || []).map(function(item) {
+          return "<li>" + escapeHtml(item) + "</li>";
+        }).join("") || "<li>等待历史数据...</li>";
+      }
+
+      function timelineTone(decision) {
+        const text = String(decision || "").toLowerCase();
+        if (text.includes("switch") || text.includes("rescue")) {
+          return "danger";
+        }
+        if (text.includes("explain") || text.includes("show")) {
+          return "warn";
+        }
+        return "";
+      }
+
+      function renderDirectorTimeline(items) {
+        const node = document.getElementById("director-timeline");
+        if (!items || !items.length) {
+          node.innerHTML = '<div class="timeline-item"><span>--</span>等待实时动作...</div>';
+          return;
+        }
+        node.innerHTML = items.slice(0, 10).map(function(item) {
+          const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
+          const tone = timelineTone(item.decision);
+          const marker = tone === "danger" ? "🔴" : tone === "warn" ? "🟡" : "🟢";
+          return '<div class="timeline-item ' + tone + '">'
+            + '<span>' + escapeHtml(time) + '</span>'
+            + '<b>' + marker + ' ' + escapeHtml(item.decision || "--") + '</b>'
+            + '<div>Reason: ' + escapeHtml((item.reason || []).join(" / ")) + '</div>'
+            + '<div>Action: ' + escapeHtml(item.next_action || "--") + '</div>'
+            + '<div>Confidence: ' + Math.round(toNumber(item.confidence) * 100) + '%</div>'
+            + '</div>';
+        }).join("");
+      }
+
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
         if (text.includes("switch")) { return "Switch product"; }
@@ -1478,9 +1625,20 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = "--";
+        document.getElementById("director-current-action").textContent = decision.action;
+        document.getElementById("director-next-sentence").textContent = decision.sentence;
+        document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";
+        document.getElementById("director-mode").textContent = data.livestream_mode || "--";
+        document.getElementById("director-next-product").textContent = data.recommended_next_product || "--";
+        document.getElementById("director-confidence").textContent = Math.round(decision.confidence * 100) + "%";
         updateTrendCards(trends);
         updateDecisionCard(decision, queue, data.recommended_next_product);
         renderRecentProductWinners(data.recent_product_winners);
+        renderProductHealth(data.product_health);
+        renderSwitchRecommendation(data.switch_recommendation);
+        renderCommentClusters(data.comment_clusters);
+        renderLearnedRecommendations(data.learned_recommendations);
+        renderDirectorTimeline(data.timeline);
         setActiveAction(chooseAction(decision.decision));
         updateHostAssistant(metrics, decision);
         updateRecommendedQueue(queue);
@@ -1516,6 +1674,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = metrics.jiangJieEffect ? Math.round(metrics.jiangJieEffect) : "--";
+        document.getElementById("director-current-action").textContent = decision.action;
+        document.getElementById("director-next-sentence").textContent = decision.sentence;
+        document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";
+        document.getElementById("director-mode").textContent = metrics.watch_time < 30 ? "Rescue mode" : "Traffic growth mode";
+        document.getElementById("director-next-product").textContent = queue[1] ? queue[1].product.name : "--";
+        document.getElementById("director-confidence").textContent = "--";
         updateTrendCards(trends);
         updateDecisionCard(decision, queue);
 

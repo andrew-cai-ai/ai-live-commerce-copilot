@@ -62,6 +62,7 @@ class LiveMetricSnapshot:
     product_events: list[ProductEvent] = field(default_factory=list)
     authenticity_comments: int = 0
     sizing_comments: int = 0
+    comment_text: str = ""
     source: str = "mock"
 
 
@@ -72,12 +73,18 @@ class LiveDecision:
     next_action: str
     recommended_next_product: str
     recent_product_winners: list[ProductEvent]
+    livestream_mode: str
+    product_health: dict[str, Any]
+    switch_recommendation: dict[str, Any]
+    comment_clusters: dict[str, Any]
+    learned_recommendations: list[str]
     reason: list[str]
     confidence: float
     trend_30s: dict[str, str]
     trend_60s: dict[str, str]
     snapshot: LiveMetricSnapshot
     source: str
+    timeline: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -87,6 +94,7 @@ class LiveDataConnector:
         self.api_token = os.getenv("LIVE_METRICS_API_TOKEN", "").strip()
         self.timeout = float(os.getenv("LIVE_METRICS_API_TIMEOUT", "5"))
         self.snapshots: list[LiveMetricSnapshot] = []
+        self.action_history: list[dict[str, Any]] = []
 
     def get_decision(
         self,
@@ -100,8 +108,22 @@ class LiveDataConnector:
         trend_30s = self._trend_for(snapshot, 30)
         trend_60s = self._trend_for(snapshot, 60)
         decision = self._decide(snapshot, trend_30s, trend_60s, products or [])
+        self._record_action(decision)
         decision.warnings.extend(warnings)
         return decision
+
+    def _record_action(self, decision: LiveDecision) -> None:
+        self.action_history.append(
+            {
+                "timestamp": decision.snapshot.timestamp,
+                "decision": decision.current_action,
+                "reason": decision.reason,
+                "next_action": decision.next_action,
+                "confidence": decision.confidence,
+            }
+        )
+        self.action_history = self.action_history[-10:]
+        decision.timeline = list(reversed(self.action_history))
 
     def _fetch_live_payload(
         self,
@@ -162,6 +184,7 @@ class LiveDataConnector:
             product_events=events,
             authenticity_comments=int(_to_number(_pick(data, "authenticity_comments", "authenticity_questions"))) or _count_authenticity_comments(comments),
             sizing_comments=int(_to_number(_pick(data, "sizing_comments", "sizing_questions"))) or _count_sizing_comments(comments),
+            comment_text=comments,
             source=source,
         )
 
@@ -201,6 +224,11 @@ class LiveDataConnector:
         current_live_score = _current_live_score(snapshot)
         recent_winners = _recent_product_winners(snapshot.product_events)
         recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
+        product_health = _product_health(snapshot, trend_30s, trend_60s)
+        comment_clusters = _comment_clusters(snapshot, snapshot.comment_text or _comment_text_from_snapshot(snapshot))
+        switch_recommendation = _switch_recommendation(snapshot, trend_60s, products)
+        livestream_mode = _livestream_mode(snapshot, trend_30s, current_live_score)
+        learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
         if snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
             current_action = "switch product"
@@ -257,6 +285,11 @@ class LiveDataConnector:
             next_action=next_action,
             recommended_next_product=recommended_next_product,
             recent_product_winners=recent_winners,
+            livestream_mode=livestream_mode,
+            product_health=product_health,
+            switch_recommendation=switch_recommendation,
+            comment_clusters=comment_clusters,
+            learned_recommendations=learned_recommendations,
             reason=reason[:3],
             confidence=confidence,
             trend_30s=trend_30s,
@@ -477,6 +510,123 @@ def _current_live_score(snapshot: LiveMetricSnapshot) -> float:
         + recent_pay * 0.20
         + stay * 0.10,
         4,
+    )
+
+
+def _product_health(
+    snapshot: LiveMetricSnapshot,
+    trend_30s: dict[str, str],
+    trend_60s: dict[str, str],
+) -> dict[str, Any]:
+    heat = round(min(snapshot.heat_score / 800, 1.0) * 100)
+    conversion = round(min(snapshot.pay_byr_rate / 0.05, 1.0) * 100)
+    engagement = round(min((snapshot.comment_uv + snapshot.atn_uv) / max(snapshot.online_uv, 1), 1.0) * 100)
+    fatigue = 20
+    if trend_60s.get("item_click_rate") == "down" or trend_60s.get("ipv_uv_rate") == "down":
+        fatigue += 25
+    if trend_60s.get("comment_uv") == "down":
+        fatigue += 20
+    if snapshot.pay_amt_5min_d_live <= 0:
+        fatigue += 25
+    if trend_30s.get("stay_time_pu") == "down":
+        fatigue += 15
+    fatigue = min(fatigue, 100)
+    if fatigue >= 70:
+        status = "⚠ Current product has been shown too long. Recommended switch soon."
+    elif conversion >= 60 and heat >= 60:
+        status = "Current product is healthy. Keep pushing."
+    else:
+        status = "Watch closely. Need stronger interaction."
+    return {
+        "product": snapshot.current_product or "当前商品",
+        "heat_score": heat,
+        "conversion_score": conversion,
+        "engagement_score": engagement,
+        "fatigue_score": fatigue,
+        "status": status,
+    }
+
+
+def _switch_recommendation(
+    snapshot: LiveMetricSnapshot,
+    trend_60s: dict[str, str],
+    products: list[dict[str, Any]],
+) -> dict[str, Any]:
+    sales_60s = snapshot.pay_amt_5min_d_live
+    viewer_drop = trend_60s.get("online_uv") == "down"
+    comment_drop = trend_60s.get("comment_uv") == "down"
+    current_expected = max(snapshot.pay_amt_5min_d_live, snapshot.item_gmv * 0.3)
+    recommended = _recommend_next_product(snapshot.current_product, products, "switch product")
+    recommended_product = next((item for item in products if item.get("name") == recommended), {})
+    recommended_expected = max(
+        current_expected * 1.4 if viewer_drop or comment_drop else current_expected,
+        float(recommended_product.get("score") or 0) * 1600,
+    )
+    switch_now = sales_60s <= 0 and viewer_drop and comment_drop
+    return {
+        "switch_now": switch_now,
+        "current_expected_gmv": round(current_expected),
+        "recommended_expected_gmv": round(recommended_expected),
+        "recommendation": "Switch now" if switch_now else "Hold and monitor",
+    }
+
+
+def _comment_clusters(snapshot: LiveMetricSnapshot, comments: str) -> dict[str, Any]:
+    counts = {
+        "Sizing questions": max(snapshot.sizing_comments, len(re.findall(r"尺码|穿啥|身高|体重|[1-2]\d{2}", comments))),
+        "Authenticity questions": max(snapshot.authenticity_comments, len(re.findall(r"真假|正品|吊牌|洗标|鉴定", comments))),
+        "Color questions": len(re.findall(r"黑色|白色|颜色|色差|有码", comments)),
+        "Price questions": len(re.findall(r"价格|贵|便宜|划算|值不值|多少钱", comments)),
+    }
+    total = sum(counts.values()) or 1
+    percentages = {key: round(value / total * 100) for key, value in counts.items()}
+    ordered = sorted(percentages.items(), key=lambda item: item[1], reverse=True)
+    action_map = {
+        "Sizing questions": "Explain sizing",
+        "Authenticity questions": "Show authenticity tags",
+        "Color questions": "Show color options",
+        "Price questions": "Explain price/value",
+    }
+    return {
+        "clusters": percentages,
+        "suggested_order": [action_map[name] for name, value in ordered if value > 0],
+    }
+
+
+def _livestream_mode(
+    snapshot: LiveMetricSnapshot,
+    trend_30s: dict[str, str],
+    live_score: float,
+) -> str:
+    if snapshot.pay_amt_5min_d_live > 0 and live_score >= 0.55:
+        return "Hot selling mode"
+    if trend_30s.get("online_uv") == "up" and trend_30s.get("heat_score") == "up":
+        return "Traffic growth mode"
+    if trend_30s.get("online_uv") == "down" and trend_30s.get("stay_time_pu") == "down":
+        return "Rescue mode"
+    if snapshot.online_uv < 80:
+        return "Opening mode"
+    if snapshot.pay_amt_5min_d_live > 0 and snapshot.pay_byr_rate >= 0.03:
+        return "Closing mode"
+    return "Traffic dropping mode" if trend_30s.get("heat_score") == "down" else "Traffic growth mode"
+
+
+def _learned_recommendations(snapshot: LiveMetricSnapshot, clusters: dict[str, Any]) -> list[str]:
+    recommendations = []
+    cluster_values = clusters.get("clusters", {})
+    if cluster_values.get("Sizing questions", 0) >= 35:
+        recommendations.append("AI learned: size explanation during the first minute often improves conversion.")
+    if snapshot.pay_amt_5min_d_live > 0 and snapshot.sizing_comments > 0:
+        recommendations.append("AI learned: answer sizing before price objection on this room.")
+    if cluster_values.get("Authenticity questions", 0) >= 25:
+        recommendations.append("AI learned: show tags early when authenticity questions rise.")
+    return recommendations or ["AI learned: keep actions short and update every 30 seconds."]
+
+
+def _comment_text_from_snapshot(snapshot: LiveMetricSnapshot) -> str:
+    return "\n".join(
+        ["尺码"] * int(snapshot.sizing_comments)
+        + ["真假"] * int(snapshot.authenticity_comments)
     )
 
 
