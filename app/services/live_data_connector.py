@@ -21,17 +21,45 @@ class ProductOption:
 
 
 @dataclass
+class ProductEvent:
+    imageUrl: str = ""
+    price: float = 0.0
+    payBuyerCnt: int = 0
+    startTime: str = ""
+    startTimeFormat: str = ""
+    title: str = ""
+    status: str = ""
+
+
+@dataclass
 class LiveMetricSnapshot:
     timestamp: float
     online_uv: float = 0.0
+    uv: float = 0.0
+    pv: float = 0.0
     stay_time_pu: float = 0.0
+    heat_score: float = 0.0
+    ipv_uv_rate: float = 0.0
+    pay_byr_rate: float = 0.0
     pay_amt: float = 0.0
     pay_buyer_cnt: float = 0.0
+    pay_item_qty: float = 0.0
+    refund_amt: float = 0.0
+    comment_uv: float = 0.0
+    atn_uv: float = 0.0
+    look_uv_td_d_live: float = 0.0
+    look_time_td_avg_d_live: float = 0.0
+    pay_amt_td_d_live: float = 0.0
+    look_uv_5min_d_live: float = 0.0
+    look_time_5min_avg_d_live: float = 0.0
+    pay_amt_5min_d_live: float = 0.0
+    pay_amt_5min_d_shop: float = 0.0
     item_click_rate: float = 0.0
     item_conversion_rate: float = 0.0
     item_add_cart_rate: float = 0.0
     item_gmv: float = 0.0
     current_product: str = ""
+    product_events: list[ProductEvent] = field(default_factory=list)
     authenticity_comments: int = 0
     sizing_comments: int = 0
     source: str = "mock"
@@ -39,9 +67,11 @@ class LiveMetricSnapshot:
 
 @dataclass
 class LiveDecision:
+    current_live_score: float
     current_action: str
     next_action: str
     recommended_next_product: str
+    recent_product_winners: list[ProductEvent]
     reason: list[str]
     confidence: float
     trend_30s: dict[str, str]
@@ -96,20 +126,42 @@ class LiveDataConnector:
         return _mock_payload(), "mock"
 
     def _build_snapshot(self, data: dict[str, Any], source: str) -> LiveMetricSnapshot:
+        total_stats = _find_dict(data, "totalStats") or data
+        data_region = _find_dict(data, "dataRegion") or {}
+        events = _parse_product_events(_find_value(data, "interactSecKill"))
         comments = _comment_text(data)
+        ipv_uv_rate = _normalize_rate(_pick(total_stats, "ipv_uv_rate", "ipvUvRate"))
+        pay_byr_rate = _normalize_rate(_pick(total_stats, "pay_byr_rate", "payByrRate"))
         return LiveMetricSnapshot(
             timestamp=time.time(),
-            online_uv=_to_number(data.get("online_uv") or data.get("uv")),
-            stay_time_pu=_to_number(data.get("stay_time_pu") or data.get("watch_duration")),
-            pay_amt=_to_number(data.get("pay_amt")),
-            pay_buyer_cnt=_to_number(data.get("pay_buyer_cnt")),
-            item_click_rate=_normalize_rate(data.get("item_click_rate") or data.get("ipv_uv_rate")),
-            item_conversion_rate=_normalize_rate(data.get("item_conversion_rate") or data.get("pay_byr_rate")),
-            item_add_cart_rate=_normalize_rate(data.get("item_add_cart_rate") or data.get("cart_rate")),
-            item_gmv=_to_number(data.get("item_gmv") or data.get("pay_amt")),
-            current_product=str(data.get("current_product") or data.get("item_name") or data.get("itemName") or "").strip(),
-            authenticity_comments=int(_to_number(data.get("authenticity_comments") or data.get("authenticity_questions"))) or _count_authenticity_comments(comments),
-            sizing_comments=int(_to_number(data.get("sizing_comments") or data.get("sizing_questions"))) or _count_sizing_comments(comments),
+            online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv") or _pick(total_stats, "uv")),
+            uv=_to_number(_pick(total_stats, "uv")),
+            pv=_to_number(_pick(total_stats, "pv")),
+            stay_time_pu=_to_number(_pick(total_stats, "stay_time_pu", "stayTimePu", "watch_duration") or _pick(data_region, "look_time_5min_avg_d_live")),
+            heat_score=_to_number(_pick(total_stats, "heat_score", "heatScore")),
+            ipv_uv_rate=ipv_uv_rate,
+            pay_byr_rate=pay_byr_rate,
+            pay_amt=_to_number(_pick(total_stats, "pay_amt", "payAmt")),
+            pay_buyer_cnt=_to_number(_pick(total_stats, "pay_buyer_cnt", "payBuyerCnt")),
+            pay_item_qty=_to_number(_pick(total_stats, "pay_item_qty", "payItemQty")),
+            refund_amt=_to_number(_pick(total_stats, "refund_amt", "refundAmt")),
+            comment_uv=_to_number(_pick(total_stats, "comment_uv", "commentUv")),
+            atn_uv=_to_number(_pick(total_stats, "atn_uv", "atnUv")),
+            look_uv_td_d_live=_to_number(_pick(data_region, "look_uv_td_d_live")),
+            look_time_td_avg_d_live=_to_number(_pick(data_region, "look_time_td_avg_d_live")),
+            pay_amt_td_d_live=_to_number(_pick(data_region, "pay_amt_td_d_live")),
+            look_uv_5min_d_live=_to_number(_pick(data_region, "look_uv_5min_d_live")),
+            look_time_5min_avg_d_live=_to_number(_pick(data_region, "look_time_5min_avg_d_live")),
+            pay_amt_5min_d_live=_to_number(_pick(data_region, "pay_amt_5min_d_live")),
+            pay_amt_5min_d_shop=_to_number(_pick(data_region, "pay_amt_5min_d_shop")),
+            item_click_rate=_normalize_rate(_pick(data, "item_click_rate", "itemClickRate") or ipv_uv_rate),
+            item_conversion_rate=_normalize_rate(_pick(data, "item_conversion_rate", "itemConversionRate") or pay_byr_rate),
+            item_add_cart_rate=_normalize_rate(_pick(data, "item_add_cart_rate", "itemAddCartRate", "cart_rate")),
+            item_gmv=_to_number(_pick(data, "item_gmv", "itemGmv") or _pick(data_region, "pay_amt_5min_d_live") or _pick(total_stats, "pay_amt")),
+            current_product=str(_pick(data, "current_product", "item_name", "itemName") or _best_event_title(events)).strip(),
+            product_events=events,
+            authenticity_comments=int(_to_number(_pick(data, "authenticity_comments", "authenticity_questions"))) or _count_authenticity_comments(comments),
+            sizing_comments=int(_to_number(_pick(data, "sizing_comments", "sizing_questions"))) or _count_sizing_comments(comments),
             source=source,
         )
 
@@ -146,8 +198,37 @@ class LiveDataConnector:
         confidence = 0.64
         current_action = "continue product"
         next_action = "继续讲当前商品，观察 30 秒趋势"
+        current_live_score = _current_live_score(snapshot)
+        recent_winners = _recent_product_winners(snapshot.product_events)
+        recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
 
-        if trend_30s["online_uv"] == "down" and trend_30s["item_add_cart_rate"] == "down":
+        if snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
+            current_action = "switch product"
+            next_action = "切到下一件更容易成交的商品"
+            reason = ["pay_amt_5min_d_live is 0", "online_uv is falling", "stay_time_pu is falling"]
+            confidence = 0.88
+        elif snapshot.heat_score > 600 and snapshot.ipv_uv_rate > 0.15:
+            current_action = "push harder"
+            next_action = "热度和点击都起来了，直接加速逼单"
+            reason = ["heat_score > 600", "ipv_uv_rate > 15%", "traffic intent is strong"]
+            confidence = 0.90
+        elif snapshot.pay_amt_5min_d_live > 0 and snapshot.heat_score > 500:
+            current_action = "push harder"
+            next_action = "刚有成交，继续讲卖点并制造尺码紧迫感"
+            reason = ["pay_amt_5min_d_live > 0", "heat_score > 500", "recent live sales confirmed"]
+            confidence = 0.87
+        elif snapshot.pay_byr_rate < 0.01 and snapshot.ipv_uv_rate > 0.15:
+            current_action = "explain value"
+            next_action = "解释价格、价值和使用场景"
+            reason = ["pay_byr_rate < 1%", "ipv_uv_rate > 15%", "users are clicking but not paying"]
+            confidence = 0.86
+        elif recent_winners and recent_winners[0].payBuyerCnt >= 5:
+            current_action = "continue product"
+            next_action = "复盘刚成交的款式，顺势推荐同类商品"
+            reason = ["recent product event has high payBuyerCnt", f"winner: {recent_winners[0].title}", "recommend similar product next"]
+            recommended_next_product = _recommend_similar_product(recent_winners[0].title, products) or recommended_next_product
+            confidence = 0.82
+        elif trend_30s["online_uv"] == "down" and trend_30s["item_add_cart_rate"] == "down":
             current_action = "switch product"
             next_action = "切到下一件更容易成交的商品"
             reason = ["online_uv 30s down", "item_add_cart_rate 30s down", "traffic and cart intent are weakening"]
@@ -171,9 +252,11 @@ class LiveDataConnector:
             reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
         return LiveDecision(
+            current_live_score=current_live_score,
             current_action=current_action,
             next_action=next_action,
-            recommended_next_product=_recommend_next_product(snapshot.current_product, products, current_action),
+            recommended_next_product=recommended_next_product,
+            recent_product_winners=recent_winners,
             reason=reason[:3],
             confidence=confidence,
             trend_30s=trend_30s,
@@ -185,9 +268,20 @@ class LiveDataConnector:
 
 _TREND_FIELDS = [
     "online_uv",
+    "uv",
+    "pv",
     "stay_time_pu",
+    "heat_score",
+    "ipv_uv_rate",
+    "pay_byr_rate",
     "pay_amt",
     "pay_buyer_cnt",
+    "pay_item_qty",
+    "comment_uv",
+    "atn_uv",
+    "look_uv_5min_d_live",
+    "look_time_5min_avg_d_live",
+    "pay_amt_5min_d_live",
     "item_click_rate",
     "item_conversion_rate",
     "item_add_cart_rate",
@@ -210,12 +304,74 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
     return payload
 
 
+def _pick(data: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in data:
+            return data[key]
+    lowered = {str(key).lower(): value for key, value in data.items()}
+    for key in keys:
+        value = lowered.get(key.lower())
+        if value is not None:
+            return value
+    return None
+
+
+def _find_value(node: Any, target_key: str) -> Any:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if str(key) == target_key:
+                return value
+        for value in node.values():
+            found = _find_value(value, target_key)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_value(item, target_key)
+            if found is not None:
+                return found
+    return None
+
+
+def _find_dict(node: Any, target_key: str) -> dict[str, Any] | None:
+    value = _find_value(node, target_key)
+    return value if isinstance(value, dict) else None
+
+
+def _parse_product_events(raw: Any) -> list[ProductEvent]:
+    if isinstance(raw, dict):
+        candidates = raw.get("list") or raw.get("items") or raw.get("data") or raw.get("result") or raw.get("products")
+        if candidates is None and any(key in raw for key in ("title", "payBuyerCnt", "imageUrl")):
+            candidates = [raw]
+    else:
+        candidates = raw
+    if not isinstance(candidates, list):
+        return []
+
+    events: list[ProductEvent] = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        events.append(
+            ProductEvent(
+                imageUrl=str(_pick(item, "imageUrl", "image_url", "picUrl") or ""),
+                price=_to_number(_pick(item, "price")),
+                payBuyerCnt=int(_to_number(_pick(item, "payBuyerCnt", "pay_buyer_cnt"))),
+                startTime=str(_pick(item, "startTime", "start_time") or ""),
+                startTimeFormat=str(_pick(item, "startTimeFormat", "start_time_format") or ""),
+                title=str(_pick(item, "title", "itemTitle", "productTitle") or ""),
+                status=str(_pick(item, "status") or ""),
+            )
+        )
+    return events
+
+
 def _to_number(value: Any) -> float:
     if value is None or value == "":
         return 0.0
     if isinstance(value, (int, float)):
         return float(value)
-    text = str(value).replace(",", "").replace("%", "").strip()
+    text = str(value).replace(",", "").replace("%", "").replace("¥", "").replace("￥", "").replace("元", "").strip()
     try:
         number = float(text)
     except ValueError:
@@ -274,6 +430,56 @@ def _recommend_next_product(current_product: str, products: list[dict[str, Any]]
     return str(sorted_products[0].get("name") or "下一件商品")
 
 
+def _recommend_similar_product(winning_title: str, products: list[dict[str, Any]]) -> str:
+    winning_tokens = set(_product_tokens(winning_title))
+    if not winning_tokens:
+        return ""
+    best_name = ""
+    best_overlap = 0
+    for product in products:
+        name = str(product.get("name") or "")
+        if name == winning_title:
+            continue
+        overlap = len(winning_tokens.intersection(_product_tokens(name)))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_name = name
+    return best_name
+
+
+def _product_tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+|[\u4e00-\u9fa5]+", text.lower())
+
+
+def _best_event_title(events: list[ProductEvent]) -> str:
+    winners = _recent_product_winners(events)
+    return winners[0].title if winners else ""
+
+
+def _recent_product_winners(events: list[ProductEvent]) -> list[ProductEvent]:
+    return sorted(
+        [event for event in events if event.title],
+        key=lambda event: (event.payBuyerCnt, event.price),
+        reverse=True,
+    )[:5]
+
+
+def _current_live_score(snapshot: LiveMetricSnapshot) -> float:
+    heat = min(snapshot.heat_score / 800, 1.0)
+    click = min(snapshot.ipv_uv_rate / 0.2, 1.0)
+    conversion = min(snapshot.pay_byr_rate / 0.05, 1.0)
+    recent_pay = min(snapshot.pay_amt_5min_d_live / 20000, 1.0)
+    stay = min(snapshot.stay_time_pu / 180, 1.0)
+    return round(
+        heat * 0.30
+        + click * 0.20
+        + conversion * 0.20
+        + recent_pay * 0.20
+        + stay * 0.10,
+        4,
+    )
+
+
 def _top_metric_reasons(
     snapshot: LiveMetricSnapshot,
     trend_30s: dict[str, str],
@@ -281,8 +487,8 @@ def _top_metric_reasons(
 ) -> list[str]:
     return [
         f"online_uv {int(snapshot.online_uv)} / 30s {trend_30s['online_uv']}",
-        f"cart_rate {snapshot.item_add_cart_rate:.1%} / 30s {trend_30s['item_add_cart_rate']}",
-        f"item_gmv ¥{int(snapshot.item_gmv)} / 60s {trend_60s['item_gmv']}",
+        f"heat_score {int(snapshot.heat_score)} / 30s {trend_30s['heat_score']}",
+        f"pay_amt_5min_d_live ¥{int(snapshot.pay_amt_5min_d_live)} / 60s {trend_60s['pay_amt_5min_d_live']}",
     ]
 
 
@@ -292,10 +498,36 @@ def _mock_payload() -> dict[str, Any]:
         "online_uv": 420 + (now % 30),
         "stay_time_pu": 48 + (now % 20),
         "pay_amt": 9000 + (now % 10) * 600,
+        "heat_score": 520 + (now % 8) * 18,
+        "ipv_uv_rate": 0.08 + (now % 4) * 0.03,
+        "pay_byr_rate": 0.012 + (now % 3) * 0.006,
         "pay_buyer_cnt": 10 + (now % 5),
+        "pay_item_qty": 12 + (now % 6),
+        "comment_uv": 20 + (now % 9),
+        "atn_uv": 18 + (now % 10),
+        "dataRegion": {
+            "look_uv_td_d_live": 2600,
+            "look_time_td_avg_d_live": 58,
+            "pay_amt_td_d_live": 36000,
+            "look_uv_5min_d_live": 420,
+            "look_time_5min_avg_d_live": 52 + (now % 10),
+            "pay_amt_5min_d_live": 1800 + (now % 6) * 500,
+            "pay_amt_5min_d_shop": 2200 + (now % 5) * 400,
+        },
         "item_click_rate": 0.06 + (now % 4) * 0.01,
         "item_conversion_rate": 0.018 + (now % 3) * 0.004,
         "item_add_cart_rate": 0.04 + (now % 5) * 0.006,
         "item_gmv": 4200 + (now % 8) * 500,
         "current_product": "当前商品",
+        "interactSecKill": [
+            {
+                "imageUrl": "",
+                "price": 899,
+                "payBuyerCnt": 6 + (now % 4),
+                "startTime": str(now),
+                "startTimeFormat": "刚刚",
+                "title": "成交款商品",
+                "status": "active",
+            }
+        ],
     }

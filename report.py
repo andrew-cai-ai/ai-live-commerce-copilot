@@ -698,7 +698,7 @@ def _render_live_mode_dashboard() -> str:
           <div class="live-metric"><span>CVR</span><b id="cvr">--</b></div>
           <div class="live-metric"><span>Add-to-cart rate</span><b id="cart-rate">--</b></div>
           <div class="live-metric"><span>Average watch duration</span><b id="watch-duration">--</b></div>
-          <div class="live-metric"><span>AI Score</span><b id="ai-live-score">--</b></div>
+          <div class="live-metric"><span>Current live score</span><b id="ai-live-score">--</b></div>
           <div class="live-metric"><span>Decision</span><b id="ai-live-decision">--</b></div>
           <div class="live-metric"><span>Item</span><b id="live-item-name">--</b></div>
           <div class="live-metric"><span>Item GMV</span><b id="live-item-gmv">--</b></div>
@@ -727,6 +727,12 @@ def _render_live_mode_dashboard() -> str:
           <div><b>Current action</b>: <span id="decision-card-action">--</span></div>
           <div><b>Confidence</b>: <span id="decision-card-confidence">--</span></div>
           <div><b>Recommended next product</b>: <span id="decision-card-next-product">--</span></div>
+        </div>
+        <div class="decision-card">
+          <span>Recent product winners</span>
+          <div id="recent-product-winners" class="script-grid">
+            <div class="script-box">等待商品事件...</div>
+          </div>
         </div>
         <div class="trend-grid">
           <div class="trend-card"><span>AI Score 30s</span><b id="trend-ai-30">--</b></div>
@@ -1353,24 +1359,24 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         snapshot = snapshot || {};
         const metrics = {
           viewer_count: toNumber(snapshot.online_uv),
-          pv: 0,
-          uv: toNumber(snapshot.online_uv),
+          pv: toNumber(snapshot.pv),
+          uv: toNumber(snapshot.uv),
           ctr: normalizeRate(snapshot.item_click_rate),
           cvr: normalizeRate(snapshot.item_conversion_rate),
           cart_rate: normalizeRate(snapshot.item_add_cart_rate),
           watch_time: toNumber(snapshot.stay_time_pu),
           pay_buyer_cnt: toNumber(snapshot.pay_buyer_cnt),
-          pay_item_qty: 0,
+          pay_item_qty: toNumber(snapshot.pay_item_qty),
           pay_amt: toNumber(snapshot.pay_amt),
-          heat_score_raw: 0,
-          heat_score: 0.5,
-          ipv_uv_rate: normalizeRate(snapshot.item_click_rate),
-          pay_byr_rate: normalizeRate(snapshot.item_conversion_rate),
-          comment_uv: toNumber(snapshot.authenticity_comments) + toNumber(snapshot.sizing_comments),
-          refund_amt: 0,
-          refund_amt_normalized: 0,
-          atn_uv: 0,
-          atn_uv_normalized: 0,
+          heat_score_raw: toNumber(snapshot.heat_score),
+          heat_score: normalizeHeatScore(snapshot.heat_score),
+          ipv_uv_rate: normalizeRate(snapshot.ipv_uv_rate || snapshot.item_click_rate),
+          pay_byr_rate: normalizeRate(snapshot.pay_byr_rate || snapshot.item_conversion_rate),
+          comment_uv: toNumber(snapshot.comment_uv) || toNumber(snapshot.authenticity_comments) + toNumber(snapshot.sizing_comments),
+          refund_amt: toNumber(snapshot.refund_amt),
+          refund_amt_normalized: normalizeRefundAmount(snapshot.refund_amt, snapshot.pay_amt),
+          atn_uv: toNumber(snapshot.atn_uv),
+          atn_uv_normalized: normalizeAudienceCount(snapshot.atn_uv, snapshot.online_uv || snapshot.uv),
           item_name: snapshot.current_product || "当前商品",
           item_click_rate: normalizeRate(snapshot.item_click_rate),
           item_conversion_rate: normalizeRate(snapshot.item_conversion_rate),
@@ -1408,6 +1414,27 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         };
       }
 
+      function renderRecentProductWinners(winners) {
+        const node = document.getElementById("recent-product-winners");
+        if (!node) {
+          return;
+        }
+        if (!winners || !winners.length) {
+          node.innerHTML = '<div class="script-box">暂无近期商品成交事件</div>';
+          return;
+        }
+        node.innerHTML = winners.slice(0, 5).map(function(item) {
+          const image = item.imageUrl ? '<img src="' + escapeHtml(item.imageUrl) + '" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:8px;margin-bottom:6px;">' : "";
+          return '<div class="script-box">'
+            + image
+            + '<h4>' + escapeHtml(item.title || "未命名商品") + '</h4>'
+            + '<div>价格: ' + formatMoney(item.price || 0) + '</div>'
+            + '<div>成交人数: ' + escapeHtml(item.payBuyerCnt || 0) + '</div>'
+            + '<div>状态: ' + escapeHtml(item.status || "--") + '</div>'
+            + '</div>';
+        }).join("");
+      }
+
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
         if (text.includes("switch")) { return "Switch product"; }
@@ -1432,6 +1459,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         };
         const trends = trendsFromConnector(data);
         const queue = buildRecommendedQueue(metrics, { decision: decisionName });
+        const liveScore = data.current_live_score || metrics.current_product_score;
 
         document.getElementById("live-status").textContent = (
           data.source === "real_api"
@@ -1445,13 +1473,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("cvr").textContent = formatPercent(metrics.item_conversion_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.item_add_cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
-        document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
+        document.getElementById("ai-live-score").textContent = Math.round(liveScore * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = "--";
         updateTrendCards(trends);
         updateDecisionCard(decision, queue, data.recommended_next_product);
+        renderRecentProductWinners(data.recent_product_winners);
         setActiveAction(chooseAction(decision.decision));
         updateHostAssistant(metrics, decision);
         updateRecommendedQueue(queue);
