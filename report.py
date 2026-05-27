@@ -203,7 +203,7 @@ def render_report_page(
     {_render_audience_question_assistant(audience_answers)}
     {_render_live_comment_input()}
     {rows}
-    {_live_mode_script()}
+    {_live_mode_script(products)}
   </main>
 </body>
 </html>"""
@@ -689,7 +689,7 @@ def _render_live_mode_dashboard() -> str:
     return """
       <section class="live-panel" id="live-mode-dashboard">
         <div class="live-head">
-          <h2>Live Mode Dashboard</h2>
+          <h2>Live Director Mode</h2>
           <span class="live-status" id="live-status">Mock livestream simulator · updates every 5s</span>
         </div>
         <div class="live-grid">
@@ -707,8 +707,11 @@ def _render_live_mode_dashboard() -> str:
         <div class="action-grid">
           <div class="action-card" id="action-continue">Continue selling</div>
           <div class="action-card" id="action-switch">Switch product</div>
+          <div class="action-card" id="action-push">Push harder</div>
           <div class="action-card" id="action-sizing">Explain sizing</div>
           <div class="action-card" id="action-auth">Show authenticity proof</div>
+          <div class="action-card" id="action-skip">Skip product</div>
+          <div class="action-card" id="action-topic">Change topic</div>
         </div>
         <div class="suggestions">
           <b>AI Decision Engine</b>
@@ -721,12 +724,26 @@ def _render_live_mode_dashboard() -> str:
           <strong id="decision-card-decision">--</strong>
           <div id="decision-card-reason">等待数据...</div>
           <div><b>Next sentence</b>: <span id="decision-card-sentence">--</span></div>
+          <div><b>Current action</b>: <span id="decision-card-action">--</span></div>
+          <div><b>Recommended next product</b>: <span id="decision-card-next-product">--</span></div>
         </div>
         <div class="trend-grid">
           <div class="trend-card"><span>AI Score 30s</span><b id="trend-ai-30">--</b></div>
           <div class="trend-card"><span>AI Score 60s</span><b id="trend-ai-60">--</b></div>
           <div class="trend-card"><span>Item CTR 30s</span><b id="trend-click-30">--</b></div>
+          <div class="trend-card"><span>Watch 30s</span><b id="trend-watch-30">--</b></div>
+          <div class="trend-card"><span>Cart 30s</span><b id="trend-cart-30">--</b></div>
+          <div class="trend-card"><span>Conversion 60s</span><b id="trend-conv-60">--</b></div>
           <div class="trend-card"><span>Item GMV 60s</span><b id="trend-gmv-60">--</b></div>
+        </div>
+        <div class="decision-card">
+          <span>Recommended queue</span>
+          <div class="order-grid" id="live-director-queue">
+            <div class="order-item"><span>Now</span><b>--</b></div>
+            <div class="order-item"><span>Next</span><b>--</b></div>
+            <div class="order-item"><span>Then</span><b>--</b></div>
+            <div class="order-item"><span>Final</span><b>--</b></div>
+          </div>
         </div>
         <div class="live-input">
           <b>Paste mtop.taobao.tblive.portal.live.user.assistant.data.get JSON</b>
@@ -785,9 +802,20 @@ def _render_host_assistant(products: list[ScoredProduct]) -> str:
       </aside>"""
 
 
-def _live_mode_script() -> str:
-    return """
+def _live_mode_script(products: list[ScoredProduct]) -> str:
+    live_products = [
+        {
+            "name": product.product_name,
+            "score": round(product.score, 4),
+            "inventory": product.stock,
+            "profit_margin": round(product.profit_margin, 4),
+            "rank": product.rank,
+        }
+        for product in products
+    ]
+    script = """
     <script>
+      const liveProducts = __LIVE_PRODUCTS__;
       const hostProducts = Array.from(document.querySelectorAll(".card h2")).map(function(node) {
         return node.textContent.trim();
       });
@@ -877,6 +905,67 @@ def _live_mode_script() -> str:
         return "¥" + Math.round(toNumber(value)).toLocaleString();
       }
 
+      function escapeHtml(text) {
+        const node = document.createElement("div");
+        node.textContent = String(text || "");
+        return node.innerHTML;
+      }
+
+      function normalizeName(text) {
+        return String(text || "").toLowerCase().replace(/[^a-z0-9\\u4e00-\\u9fa5]+/g, "");
+      }
+
+      function currentLiveProduct(itemName) {
+        if (!liveProducts.length) {
+          return { name: itemName || "当前商品", score: 0.5, inventory: 0, profit_margin: 0 };
+        }
+        const normalizedItem = normalizeName(itemName);
+        const matched = liveProducts.find(function(product) {
+          const normalizedProduct = normalizeName(product.name);
+          return normalizedItem && (normalizedItem.includes(normalizedProduct) || normalizedProduct.includes(normalizedItem));
+        });
+        return matched || liveProducts[hostProductIndex] || liveProducts[0];
+      }
+
+      function productContext(metrics) {
+        const product = currentLiveProduct(metrics.item_name);
+        const inventory = metrics.inventory || product.inventory || 0;
+        const profitMargin = metrics.profit_margin || product.profit_margin || 0;
+        return {
+          product: product,
+          inventory: inventory,
+          inventory_score: clamp(inventory / 50, 0, 1),
+          profit_margin: profitMargin,
+          profit_score: clamp(profitMargin, 0, 1)
+        };
+      }
+
+      function computeProductScore(metrics) {
+        const context = productContext(metrics);
+        const clickRate = metrics.item_click_rate || metrics.ipv_uv_rate || 0;
+        const conversionRate = metrics.item_conversion_rate || metrics.pay_byr_rate || 0;
+        return clamp(
+          metrics.heat_score * 0.20
+          + clickRate * 0.20
+          + conversionRate * 0.25
+          + (metrics.item_add_cart_rate || metrics.cart_rate || 0) * 0.15
+          + normalizeStayTime(metrics.watch_time) * 0.10
+          + normalizeMoney(metrics.item_gmv || metrics.pay_amt || 0) * 0.05
+          + context.inventory_score * 0.03
+          + context.profit_score * 0.02,
+          0,
+          1
+        );
+      }
+
+      function enrichMetrics(metrics) {
+        const context = productContext(metrics);
+        metrics.inventory = metrics.inventory || context.inventory;
+        metrics.profit_margin = metrics.profit_margin || context.profit_margin;
+        metrics.current_product_score = computeProductScore(metrics);
+        return metrics;
+      }
+
       function findAssistantData(payload) {
         if (!payload || typeof payload !== "object") {
           return null;
@@ -940,7 +1029,7 @@ def _live_mode_script() -> str:
         const uv = toNumber(data.uv);
         const ipvUvRate = normalizeRate(data.ipv_uv_rate);
         const payByrRate = normalizeRate(data.pay_byr_rate);
-        const stayTime = toNumber(data.stay_time_pu);
+        const stayTime = toNumber(data.stay_time_pu || data.watch_duration);
         const commentUv = toNumber(data.comment_uv);
         const atnUv = toNumber(data.atn_uv);
         const payAmt = toNumber(data.pay_amt);
@@ -952,7 +1041,7 @@ def _live_mode_script() -> str:
         const itemGmv = toNumber(data.item_gmv);
         const jiangJieEffect = toNumber(data.jiangJieEffect);
         const heat = normalizeHeatScore(data.heat_score);
-        const stay = normalizeStayTime(data.stay_time_pu);
+        const stay = normalizeStayTime(data.stay_time_pu || data.watch_duration);
         const attention = normalizeAudienceCount(data.atn_uv, onlineUv || uv);
         const refund = normalizeRefundAmount(data.refund_amt, data.pay_amt);
         const score = (
@@ -963,7 +1052,7 @@ def _live_mode_script() -> str:
           + attention * 0.05
           - refund * 0.10
         );
-        return {
+        return enrichMetrics({
           viewer_count: onlineUv || uv,
           pv: pv,
           uv: uv,
@@ -989,25 +1078,52 @@ def _live_mode_script() -> str:
           item_add_cart_rate: itemAddCartRate,
           item_gmv: itemGmv,
           jiangJieEffect: jiangJieEffect,
+          inventory: toNumber(data.inventory),
+          profit_margin: normalizeRate(data.profit_margin),
+          authenticity_questions: toNumber(data.authenticity_questions || data.auth_questions),
+          sizing_questions: toNumber(data.sizing_questions || data.size_questions),
           ai_score: clamp(score, 0, 1),
           source: data.manual_fallback ? "manual" : "real"
-        };
+        });
       }
 
-      function calculateDecision(metrics) {
-        if (metrics.comment_uv > 25 && metrics.pay_byr_rate < 0.025) {
-          return "Show authenticity";
-        }
-        if ((metrics.item_click_rate || metrics.ipv_uv_rate) > 0.08 && (metrics.item_conversion_rate || metrics.pay_byr_rate) < 0.02) {
+      function calculateDecision(metrics, trends) {
+        const clickRate = metrics.item_click_rate || metrics.ipv_uv_rate || 0;
+        const conversionRate = metrics.item_conversion_rate || metrics.pay_byr_rate || 0;
+        const addCartRate = metrics.item_add_cart_rate || metrics.cart_rate || 0;
+        const score = metrics.current_product_score || metrics.ai_score || 0;
+        const ctrUp = trends && trends.click30.direction === "up";
+        const watchUp = trends && trends.watch30.direction === "up";
+        const cartUp = trends && trends.cart30.direction === "up";
+        const ctrDown = trends && trends.click30.direction === "down";
+        const watchDown = trends && trends.watch30.direction === "down";
+        const conversionDown = trends && trends.conv60.direction === "down";
+
+        if (metrics.sizing_questions > 3) {
           return "Explain sizing";
         }
-        if (metrics.ai_score >= 0.62 && metrics.pay_byr_rate >= 0.025) {
+        if (metrics.authenticity_questions > 3 || (metrics.comment_uv > 25 && conversionRate < 0.025)) {
+          return "Show authenticity";
+        }
+        if (clickRate >= 0.07 && conversionRate < 0.02) {
+          return "Explain value/price";
+        }
+        if (ctrUp && watchUp && cartUp) {
+          return "Continue product";
+        }
+        if (ctrDown && watchDown && conversionDown) {
+          return "Switch product";
+        }
+        if (score < 0.24 && metrics.watch_time < 25 && conversionRate < 0.01) {
+          return "Skip product";
+        }
+        if (addCartRate >= 0.05 || (score >= 0.62 && conversionRate >= 0.025)) {
           return "Push harder";
         }
-        if (metrics.ai_score >= 0.38 && metrics.watch_time >= 30) {
-          return "Continue";
+        if (metrics.watch_time < 30) {
+          return "Change topic";
         }
-        return "Switch";
+        return "Continue product";
       }
 
       function metricContributions(metrics) {
@@ -1028,7 +1144,7 @@ def _live_mode_script() -> str:
       }
 
       function nextHostSentence(decision, metrics) {
-        if (decision === "Switch") {
+        if (decision === "Switch product") {
           return "这件先放一下，哥几个我们切下一件更好成交的。";
         }
         if (decision === "Explain sizing") {
@@ -1036,6 +1152,15 @@ def _live_mode_script() -> str:
         }
         if (decision === "Show authenticity") {
           return "镜头拉近，吊牌、洗标和细节我直接给大家看。";
+        }
+        if (decision === "Explain value/price") {
+          return "别光看价格，我说实话，这件贵在哪、适合谁我直接讲明白。";
+        }
+        if (decision === "Skip product") {
+          return "这件今天先不硬推，库存和反馈不够好，我们换一件更好卖的。";
+        }
+        if (decision === "Change topic") {
+          return "先别急着拍，我换个场景讲，平时通勤到底能不能穿。";
         }
         if (decision === "Push harder") {
           if (metrics.pay_byr_rate > 0.03) {
@@ -1052,26 +1177,41 @@ def _live_mode_script() -> str:
         return "继续看细节，镜头拉近一点，吊牌和做工给大家看清楚。";
       }
 
-      function buildDecisionReasons(metrics) {
-        const decision = calculateDecision(metrics);
+      function currentActionText(decision) {
+        const actions = {
+          "Continue product": "继续讲当前商品",
+          "Switch product": "切换下一件",
+          "Push harder": "加速逼单",
+          "Skip product": "跳过这件",
+          "Change topic": "换话题保停留",
+          "Explain value/price": "解释价值和价格",
+          "Explain sizing": "开始讲尺码",
+          "Show authenticity": "展示吊牌和洗标"
+        };
+        return actions[decision] || "继续观察";
+      }
+
+      function buildDecisionReasons(metrics, trends) {
+        const decision = calculateDecision(metrics, trends);
         const reasons = metricContributions(metrics).map(function(row) {
           return row.label + ": " + (row.value >= 0 ? "+" : "") + (row.value * 100).toFixed(1);
         });
         return {
           decision: decision,
           reasons: reasons.slice(0, 3),
-          sentence: nextHostSentence(decision, metrics)
+          sentence: nextHostSentence(decision, metrics),
+          action: currentActionText(decision)
         };
       }
 
       function setActiveAction(actionId) {
-        ["action-continue", "action-switch", "action-sizing", "action-auth"].forEach(function(id) {
+        ["action-continue", "action-switch", "action-push", "action-sizing", "action-auth", "action-skip", "action-topic"].forEach(function(id) {
           document.getElementById(id).classList.toggle("active", id === actionId);
         });
       }
 
-      function buildSuggestions(metrics) {
-        const decision = buildDecisionReasons(metrics);
+      function buildSuggestions(metrics, trends) {
+        const decision = buildDecisionReasons(metrics, trends);
         const suggestions = [
           "Decision: " + decision.decision,
           "Reason: " + decision.reasons.join(" / "),
@@ -1102,16 +1242,24 @@ def _live_mode_script() -> str:
         return "继续讲90秒";
       }
 
-      function chooseAction(metrics) {
-        const decision = calculateDecision(metrics);
-        if (decision === "Switch") {
+      function chooseAction(decision) {
+        if (decision === "Switch product") {
           return "action-switch";
+        }
+        if (decision === "Push harder") {
+          return "action-push";
         }
         if (decision === "Explain sizing") {
           return "action-sizing";
         }
         if (decision === "Show authenticity") {
           return "action-auth";
+        }
+        if (decision === "Skip product") {
+          return "action-skip";
+        }
+        if (decision === "Change topic" || decision === "Explain value/price") {
+          return "action-topic";
         }
         return "action-continue";
       }
@@ -1131,6 +1279,7 @@ def _live_mode_script() -> str:
           renderLiveDecision(buildMetricsFromAssistantData(manualPayload));
           return;
         }
+        const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
         const metrics = {
           viewer_count: Math.round(randomBetween(180, 980)),
           pv: Math.round(randomBetween(2000, 18000)),
@@ -1155,6 +1304,8 @@ def _live_mode_script() -> str:
           refund_amt_normalized: 0,
           atn_uv: Math.round(randomBetween(0, 120)),
           atn_uv_normalized: 0,
+          inventory: liveProduct.inventory || 0,
+          profit_margin: liveProduct.profit_margin || 0,
           authenticity_questions: Math.round(randomBetween(0, 7)),
           sizing_questions: Math.round(randomBetween(0, 7)),
           source: "mock"
@@ -1173,13 +1324,15 @@ def _live_mode_script() -> str:
           0,
           1
         );
-        renderLiveDecision(metrics);
+        renderLiveDecision(enrichMetrics(metrics));
       }
 
       function renderLiveDecision(metrics) {
-        const decision = buildDecisionReasons(metrics);
+        enrichMetrics(metrics);
         pushMetricHistory(metrics);
         const trends = buildTrendSummary(metrics);
+        const decision = buildDecisionReasons(metrics, trends);
+        const queue = buildRecommendedQueue(metrics, decision);
         document.getElementById("live-status").textContent = (
           metrics.source === "real"
             ? "Using real Taobao live assistant data · updates every 5s"
@@ -1192,19 +1345,20 @@ def _live_mode_script() -> str:
         document.getElementById("cvr").textContent = formatPercent(metrics.pay_byr_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
-        document.getElementById("ai-live-score").textContent = Math.round(metrics.ai_score * 100);
+        document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = metrics.jiangJieEffect ? Math.round(metrics.jiangJieEffect) : "--";
         updateTrendCards(trends);
-        updateDecisionCard(decision);
+        updateDecisionCard(decision, queue);
 
-        setActiveAction(chooseAction(metrics));
+        setActiveAction(chooseAction(decision.decision));
         updateHostAssistant(metrics, decision);
+        updateRecommendedQueue(queue);
 
         const suggestionList = document.getElementById("host-suggestions");
-        suggestionList.innerHTML = buildSuggestions(metrics)
+        suggestionList.innerHTML = buildSuggestions(metrics, trends)
           .map(function(text) { return "<li>" + text + "</li>"; })
           .join("");
       }
@@ -1230,26 +1384,29 @@ def _live_mode_script() -> str:
 
       function trendArrow(current, previous) {
         if (!previous && previous !== 0) {
-          return { label: "--", className: "trend-stable" };
+          return { label: "--", className: "trend-stable", direction: "unknown" };
         }
         const diff = current - previous;
         const threshold = Math.max(0.003, Math.abs(previous) * 0.05);
         if (diff > threshold) {
-          return { label: "up ↑", className: "trend-up" };
+          return { label: "up ↑", className: "trend-up", direction: "up" };
         }
         if (diff < -threshold) {
-          return { label: "down ↓", className: "trend-down" };
+          return { label: "down ↓", className: "trend-down", direction: "down" };
         }
-        return { label: "stable →", className: "trend-stable" };
+        return { label: "stable →", className: "trend-stable", direction: "stable" };
       }
 
       function buildTrendSummary(metrics) {
         const ago30 = metricSnapshotAgo(30);
         const ago60 = metricSnapshotAgo(60);
         return {
-          ai30: trendArrow(metrics.ai_score, ago30 && ago30.ai_score),
-          ai60: trendArrow(metrics.ai_score, ago60 && ago60.ai_score),
+          ai30: trendArrow(metrics.current_product_score, ago30 && ago30.current_product_score),
+          ai60: trendArrow(metrics.current_product_score, ago60 && ago60.current_product_score),
           click30: trendArrow(metrics.item_click_rate || metrics.ipv_uv_rate, ago30 && (ago30.item_click_rate || ago30.ipv_uv_rate)),
+          watch30: trendArrow(normalizeStayTime(metrics.watch_time), ago30 && normalizeStayTime(ago30.watch_time)),
+          cart30: trendArrow(metrics.item_add_cart_rate || metrics.cart_rate, ago30 && (ago30.item_add_cart_rate || ago30.cart_rate)),
+          conv60: trendArrow(metrics.item_conversion_rate || metrics.pay_byr_rate, ago60 && (ago60.item_conversion_rate || ago60.pay_byr_rate)),
           gmv60: trendArrow(metrics.item_gmv || metrics.pay_amt, ago60 && (ago60.item_gmv || ago60.pay_amt))
         };
       }
@@ -1258,6 +1415,9 @@ def _live_mode_script() -> str:
         setTrend("trend-ai-30", trends.ai30);
         setTrend("trend-ai-60", trends.ai60);
         setTrend("trend-click-30", trends.click30);
+        setTrend("trend-watch-30", trends.watch30);
+        setTrend("trend-cart-30", trends.cart30);
+        setTrend("trend-conv-60", trends.conv60);
         setTrend("trend-gmv-60", trends.gmv60);
       }
 
@@ -1267,24 +1427,63 @@ def _live_mode_script() -> str:
         node.className = trend.className;
       }
 
-      function updateDecisionCard(decision) {
+      function buildRecommendedQueue(metrics, decision) {
+        const current = currentLiveProduct(metrics.item_name);
+        const sorted = liveProducts.slice().sort(function(a, b) {
+          const aProfit = a.profit_margin || 0;
+          const bProfit = b.profit_margin || 0;
+          return (b.score + bProfit * 0.15) - (a.score + aProfit * 0.15);
+        });
+        const others = sorted.filter(function(product) { return product.name !== current.name; });
+        let queue = [current].concat(others);
+        if (decision.decision === "Switch product" || decision.decision === "Skip product") {
+          queue = others.concat([current]);
+        }
+        while (queue.length < 4 && queue.length) {
+          queue.push(queue[queue.length - 1]);
+        }
+        return queue.slice(0, 4).map(function(product, index) {
+          const labels = ["Now", "Next", "Then", "Final"];
+          return { label: labels[index], product: product };
+        });
+      }
+
+      function updateDecisionCard(decision, queue) {
         document.getElementById("decision-card-decision").textContent = decision.decision;
         document.getElementById("decision-card-reason").textContent = decision.reasons.join(" / ");
         document.getElementById("decision-card-sentence").textContent = decision.sentence;
+        document.getElementById("decision-card-action").textContent = decision.action;
+        document.getElementById("decision-card-next-product").textContent = queue[1] ? queue[1].product.name : "--";
+      }
+
+      function updateRecommendedQueue(queue) {
+        const node = document.getElementById("live-director-queue");
+        if (!node) {
+          return;
+        }
+        if (!queue.length) {
+          node.innerHTML = '<div class="order-item"><span>Now</span><b>--</b></div>';
+          return;
+        }
+        node.innerHTML = queue.map(function(item) {
+          return '<div class="order-item"><span>' + escapeHtml(item.label) + '</span><b>' + escapeHtml(item.product.name) + '</b></div>';
+        }).join("");
       }
 
       function updateHostAssistant(metrics, decision) {
         decision = decision || buildDecisionReasons(metrics);
-        if (hostProducts.length && decision.decision === "Switch") {
+        if (hostProducts.length && (decision.decision === "Switch product" || decision.decision === "Skip product")) {
           hostProductIndex = Math.min(hostProductIndex + 1, hostProducts.length - 1);
         }
-        const currentProduct = metrics.item_name || hostProducts[hostProductIndex] || "等待商品";
+        const currentProduct = (decision.decision === "Switch product" || decision.decision === "Skip product")
+          ? (hostProducts[hostProductIndex] || metrics.item_name || "等待商品")
+          : (metrics.item_name || hostProducts[hostProductIndex] || "等待商品");
         document.getElementById("host-current-product").textContent = currentProduct;
         document.getElementById("host-viewer-count").textContent = metrics.viewer_count.toLocaleString();
         document.getElementById("host-ctr").textContent = formatPercent(metrics.ipv_uv_rate);
         document.getElementById("host-cvr").textContent = formatPercent(metrics.pay_byr_rate);
         document.getElementById("host-watch-duration").textContent = Math.round(metrics.watch_time) + "s";
-        document.getElementById("host-ai-score").textContent = Math.round(metrics.ai_score * 100);
+        document.getElementById("host-ai-score").textContent = Math.round(metrics.current_product_score * 100);
         document.getElementById("host-ai-decision").textContent = decision.decision;
         document.getElementById("host-primary-suggestion").textContent = decision.decision;
         document.getElementById("host-next-sentence").textContent = decision.sentence;
@@ -1348,6 +1547,7 @@ def _live_mode_script() -> str:
       window.setInterval(simulateLiveMetrics, 5000);
       window.setInterval(updateLiveCommentAssistant, 5000);
     </script>"""
+    return script.replace("__LIVE_PRODUCTS__", json.dumps(live_products, ensure_ascii=False))
 
 
 def _livestream_order(
