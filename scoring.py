@@ -20,6 +20,8 @@ class InventoryItem:
     sku_count: int = 0
     category: str = ""
     status: str = ""
+    color: str = ""
+    notes: str = ""
     source: str = "manual"
 
 
@@ -82,9 +84,9 @@ def parse_inventory(raw_text: str) -> list[InventoryItem]:
         items.append(
             InventoryItem(
                 product_name=name.strip(),
-                cost=_parse_money(cost, line_number, "cost"),
-                stock=_parse_stock(stock, line_number),
-                target_selling_price=_parse_money(target_price, line_number, "target selling price"),
+                cost=_parse_optional_money(cost, line_number, "cost") or 0.0,
+                stock=_parse_optional_stock(stock, line_number) or 0,
+                target_selling_price=_parse_optional_money(target_price, line_number, "target selling price") or 0.0,
             )
         )
 
@@ -382,6 +384,12 @@ def _parse_stock(value: str, line_number: int) -> int:
         raise ValueError(f"第 {line_number} 行：库存必须是整数。") from exc
 
 
+def _parse_optional_stock(value: str, line_number: int) -> int | None:
+    if not value.strip():
+        return None
+    return _parse_stock(value, line_number)
+
+
 def _normalize(value: float, minimum: float, maximum: float) -> float:
     if maximum == minimum:
         return 1.0 if value > 0 else 0.0
@@ -390,7 +398,10 @@ def _normalize(value: float, minimum: float, maximum: float) -> float:
 
 def _looks_like_header(line: str) -> bool:
     lowered = line.lower()
-    return "product" in lowered and "cost" in lowered and "stock" in lowered
+    has_product = "product" in lowered or "商品" in lowered or "品名" in lowered
+    has_cost = "cost" in lowered or "成本" in lowered or "进价" in lowered or "供货价" in lowered
+    has_inventory = "stock" in lowered or "inventory" in lowered or "库存" in lowered or "数量" in lowered
+    return has_product and has_cost and has_inventory
 
 
 def _looks_like_manual_header(line: str) -> bool:

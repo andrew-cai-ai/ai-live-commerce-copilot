@@ -78,6 +78,24 @@ Atom Hoody, 180, 24, 300
 
 CSV, tab-separated, or pipe-separated rows are supported.
 
+## Smart Excel / CSV Import
+
+The upload flow supports `.xlsx` and `.csv` files. Click **预览 Excel/CSV** first to inspect normalized rows, then click **生成选品报告** after confirming.
+
+Only `product_name` is required. Other fields may be blank.
+
+Column headers are mapped by keywords:
+
+- `商品名 / 品名 / product / title / name` -> `product_name`
+- `SKU / 货号 / 编码 / 款号` -> `sku`
+- `颜色 / color` -> `color`
+- `成本 / 进价 / 供货价 / cost` -> `cost_price`
+- `库存 / 数量 / stock / inventory` -> `inventory`
+- `售价 / 目标售价 / 建议售价 / price` -> `target_price`
+- `备注 / 卖点 / 活动 / tag / notes` -> `notes`
+
+Extra columns and empty rows are ignored. If headers are messy, the importer uses content heuristics to guess product and numeric columns.
+
 ## Manual Research Override
 
 The optional manual research box lets you add field research before Taobao, Dewu, Douyin, and Xiaohongshu APIs are integrated.
