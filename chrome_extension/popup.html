@@ -85,11 +85,47 @@
         color: var(--muted);
         font-size: 11px;
       }
+      .steps {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .step {
+        display: grid;
+        grid-template-columns: 22px 1fr;
+        gap: 8px;
+        align-items: start;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        font-size: 12px;
+      }
+      .dot {
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: #e5e7eb;
+        color: #374151;
+        font-weight: 900;
+      }
+      .step.done .dot { background: #d1fae5; color: var(--good); }
+      .step.active .dot { background: #fef3c7; color: var(--warn); }
+      .step b { display: block; }
+      .step span { color: var(--muted); }
     </style>
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
-    <div class="version">Debug build: 2026-05-28-v12 · Cloud: ai-live-commerce-copilot.onrender.com</div>
+    <div class="version">Debug build: 2026-05-28-v13 · Cloud: ai-live-commerce-copilot.onrender.com</div>
+    <div class="steps">
+      <div class="step" id="step-page"><div class="dot">1</div><div><b>打开淘宝直播中控</b><span id="step-page-text">等待检测当前页面</span></div></div>
+      <div class="step" id="step-inject"><div class="dot">2</div><div><b>注入采集脚本</b><span id="step-inject-text">点击下方按钮或刷新页面</span></div></div>
+      <div class="step" id="step-capture"><div class="dot">3</div><div><b>捕获实时接口</b><span id="step-capture-text">等待直播数据接口出现</span></div></div>
+      <div class="step" id="step-send"><div class="dot">4</div><div><b>发送到云端系统</b><span id="step-send-text">等待发送结果</span></div></div>
+    </div>
     <button class="top-action" id="inject-now">手动注入当前页面</button>
     <div class="status">
       <div class="row"><span>Popup JS</span><b id="popup-js">not loaded</b></div>

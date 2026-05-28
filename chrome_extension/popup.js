@@ -49,6 +49,7 @@ function render(status) {
   };
   setText("manual-inject", manualStatus.status, manualStatus.className || "");
   setText("error", manualStatus.error || status.lastError || "--", manualStatus.error || status.lastError ? "bad" : "");
+  renderSteps(status);
 
   const hint = document.getElementById("hint");
   if (!status.contentScriptInjected) {
@@ -68,6 +69,37 @@ function render(status) {
     return;
   }
   hint.textContent = "链路已通。回到本地报告页，Payload source 应显示 extension。";
+}
+
+function setStep(id, state, text) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  node.className = "step " + (state || "");
+  const textNode = document.getElementById(id + "-text");
+  if (textNode && text) textNode.textContent = text;
+}
+
+function renderSteps(status) {
+  setStep(
+    "step-page",
+    status.activeTabMatches ? "done" : "active",
+    status.activeTabMatches ? "已在淘宝/天猫直播相关页面" : "请切到 liveplatform.taobao.com 页面"
+  );
+  setStep(
+    "step-inject",
+    status.contentScriptInjected && (status.pageHookInjected || status.pageHookScriptLoaded) ? "done" : status.activeTabMatches ? "active" : "",
+    status.contentScriptInjected ? "采集脚本已注入" : "点击“手动注入当前页面”"
+  );
+  setStep(
+    "step-capture",
+    status.capturedTargetApi ? "done" : status.contentScriptInjected ? "active" : "",
+    status.capturedTargetApi ? "已捕获 Taobao mtop 实时接口" : "进入实时直播中控页，等待接口刷新"
+  );
+  setStep(
+    "step-send",
+    status.lastSendSuccess ? "done" : status.lastParseSuccess ? "active" : "",
+    status.lastSendSuccess ? "已发送到云端/本地系统" : status.lastParseSuccess ? "已解析，正在发送" : "等待解析成功"
+  );
 }
 
 function updateStatus(patch, callback) {

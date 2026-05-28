@@ -106,6 +106,13 @@ def export_report(request: Request, report_id: str):
     )
 
 
+@app.get("/live", response_class=HTMLResponse)
+def live_console(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_live_console()
+
+
 @app.post("/login")
 def login(password: str = Form("")):
     if not password_matches(password):
@@ -449,7 +456,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/live">打开主播控制台</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -533,6 +540,199 @@ def _render_reports_index() -> str:
 </html>"""
 
 
+def _render_live_console() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>主播实时控制台</title>
+  <style>
+    :root { color-scheme: light; --ink: #111827; --muted: #64706c; --line: #d9e2de; --paper: #f5f8f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e1f2eb; --warn: #a16207; --danger: #b42318; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }
+    main { max-width: 1320px; margin: 0 auto; padding: 18px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 24px; }
+    a { color: var(--accent); font-weight: 800; text-decoration: none; }
+    .status { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 900; }
+    .layout { display: grid; grid-template-columns: 1.25fr .85fr; gap: 14px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+    .hero { border: 2px solid var(--accent); background: #f2f8f5; min-height: 360px; display: grid; align-content: center; gap: 14px; }
+    .label { display: block; color: var(--muted); font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0; }
+    .action { font-size: clamp(34px, 6vw, 72px); line-height: 1.02; color: var(--accent); font-weight: 950; }
+    .sentence { font-size: clamp(24px, 4vw, 44px); line-height: 1.18; font-weight: 950; }
+    .reason { color: var(--muted); font-size: 18px; font-weight: 800; }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-height: 96px; }
+    .card b { display: block; font-size: 28px; margin-top: 4px; overflow-wrap: anywhere; }
+    .side { display: grid; gap: 14px; align-content: start; }
+    .host-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fbfdfb; }
+    button { border: 0; border-radius: 8px; padding: 10px 12px; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; }
+    .rooms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .room { border: 1px solid var(--line); background: #fbfdfb; color: var(--accent); border-radius: 999px; padding: 6px 9px; font-weight: 900; cursor: pointer; }
+    .queue { display: grid; gap: 8px; }
+    .queue-item { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
+    .timeline { display: grid; gap: 8px; max-height: 320px; overflow-y: auto; }
+    .timeline-item { border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px; background: #fff; }
+    .timeline-item.danger { border-left-color: var(--danger); }
+    .timeline-item.warn { border-left-color: var(--warn); }
+    .comments { min-height: 90px; }
+    .reply { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
+    .small { color: var(--muted); font-size: 13px; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><h1>主播实时控制台</h1><div class="small">只看未来 10-30 秒该做什么</div></div>
+      <div><span class="status" id="connection-status">等待插件数据...</span><a href="/" style="margin-left:12px;">返回选品</a></div>
+    </header>
+    <section class="layout">
+      <div>
+        <section class="panel hero">
+          <span class="label">Current action</span>
+          <div class="action" id="current-action">等待数据</div>
+          <span class="label">Next sentence</span>
+          <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
+          <div class="reason" id="reason">--</div>
+        </section>
+        <section class="cards">
+          <div class="card"><span class="label">当前直播间</span><b id="host-id-label">default</b></div>
+          <div class="card"><span class="label">总观看</span><b id="viewer-count">--</b></div>
+          <div class="card"><span class="label">在线</span><b id="online-uv">--</b></div>
+          <div class="card"><span class="label">GMV</span><b id="pay-amt">--</b></div>
+          <div class="card"><span class="label">热度</span><b id="heat-score">--</b></div>
+          <div class="card"><span class="label">CTR</span><b id="ctr">--</b></div>
+          <div class="card"><span class="label">CVR</span><b id="cvr">--</b></div>
+          <div class="card"><span class="label">停留</span><b id="watch-time">--</b></div>
+        </section>
+      </div>
+      <div class="side">
+        <section class="panel">
+          <span class="label">连接直播间</span>
+          <div class="host-input"><input id="host-id-input" placeholder="default 或 liveId"><button id="save-host">连接</button></div>
+          <div class="rooms" id="active-rooms"></div>
+          <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
+        </section>
+        <section class="panel"><span class="label">推荐商品队列</span><div class="queue" id="queue"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div></section>
+        <section class="panel">
+          <span class="label">观众问题助手</span>
+          <textarea class="comments" id="comments" placeholder="粘贴评论，例如：175 70kg穿啥&#10;真的假的&#10;黑色有吗"></textarea>
+          <div id="comment-replies"></div>
+        </section>
+        <section class="panel"><span class="label">AI Director Timeline</span><div class="timeline" id="timeline"><div class="timeline-item">等待实时动作...</div></div></section>
+      </div>
+    </section>
+  </main>
+  <script>
+    const products = [];
+    function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
+    function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    function hostId() { const input = document.getElementById("host-id-input"); return (input && input.value.trim()) || localStorage.getItem("ai_live_host_id") || "default"; }
+    function setHostId(value) { const next = value || "default"; document.getElementById("host-id-input").value = next; document.getElementById("host-id-label").textContent = next; localStorage.setItem("ai_live_host_id", next); }
+    function normalizeAction(action) {
+      const text = String(action || "");
+      if (text.includes("No valid")) return "等待真实数据";
+      if (text.includes("数据不完整")) return "等待补齐数据";
+      if (text.includes("switch")) return "切换商品";
+      if (text.includes("push")) return "加速逼单";
+      if (text.includes("value")) return "解释价格";
+      if (text.includes("sizing")) return "讲尺码";
+      if (text.includes("authenticity")) return "展示正品细节";
+      if (text.includes("continue")) return "继续讲";
+      return text || "等待数据";
+    }
+    function nextSentence(action, nextAction) {
+      const text = String(action || "").toLowerCase();
+      if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
+      if (text.includes("value")) return "别光看价格，平时通勤能穿，买回去不会吃灰。";
+      if (text.includes("sizing")) return "175/70 正常 M，里面加卫衣建议 L。";
+      if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
+      if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
+      return nextAction || "哥几个看一下，这件现在数据还不错，先继续讲 30 秒。";
+    }
+    async function refreshSessions() {
+      const node = document.getElementById("active-rooms");
+      try {
+        const response = await fetch("/api/live/sessions");
+        const data = await response.json();
+        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        const fresh = sessions.filter((item) => item.age_seconds === null || item.age_seconds <= 60).slice(0, 6);
+        if (!fresh.length) { node.innerHTML = '<span class="small">暂无活跃插件数据</span>'; return; }
+        if ((hostId() === "default" || !hostId()) && fresh.length === 1) setHostId(fresh[0].host_id);
+        node.innerHTML = fresh.map((item) => '<button class="room" data-host-id="' + escapeHtml(item.host_id) + '">' + escapeHtml(item.host_id) + ' · ' + Math.round(item.age_seconds || 0) + 's</button>').join("");
+        node.querySelectorAll(".room").forEach((button) => button.addEventListener("click", () => { setHostId(button.getAttribute("data-host-id")); refreshDecision(); }));
+      } catch (error) { node.innerHTML = '<span class="small">读取活跃房间失败</span>'; }
+    }
+    async function refreshDecision() {
+      const response = await fetch("/api/live/decision", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host_id: hostId(), products }) });
+      const data = await response.json();
+      if (!data.error) renderDecision(data);
+    }
+    function renderDecision(data) {
+      const snapshot = data.snapshot || {};
+      const action = normalizeAction(data.current_action);
+      document.getElementById("current-action").textContent = action;
+      document.getElementById("next-sentence").textContent = nextSentence(data.current_action, data.next_action);
+      document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
+      document.getElementById("host-id-label").textContent = data.host_id || hostId();
+      document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
+      document.getElementById("online-uv").textContent = fmtNumber(snapshot.online_uv);
+      document.getElementById("pay-amt").textContent = fmtMoney(snapshot.pay_amt || snapshot.live_pay_amt);
+      document.getElementById("heat-score").textContent = fmtNumber(snapshot.heat_score);
+      document.getElementById("ctr").textContent = fmtPercent(snapshot.ipv_uv_rate);
+      document.getElementById("cvr").textContent = fmtPercent(snapshot.pay_byr_rate);
+      document.getElementById("watch-time").textContent = snapshot.stay_time_pu ? Math.round(snapshot.stay_time_pu) + "s" : "--";
+      document.getElementById("connection-status").textContent = data.valid_live_metrics ? "真实数据已连接" : "等待有效直播数据";
+      document.getElementById("last-updated").textContent = snapshot.timestamp ? "Last updated: " + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "Last updated: --";
+      renderTimeline(data.timeline || []);
+      renderQueue(data);
+    }
+    function renderTimeline(items) {
+      const node = document.getElementById("timeline");
+      if (!items.length) { node.innerHTML = '<div class="timeline-item">等待实时动作...</div>'; return; }
+      node.innerHTML = items.slice(0, 8).map((item) => {
+        const cls = item.event_type === "danger" ? " danger" : item.event_type === "warning" ? " warn" : "";
+        const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
+        return '<div class="timeline-item' + cls + '"><b>' + time + ' · ' + normalizeAction(item.decision) + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(nextSentence(item.decision, item.next_action)) + '</div></div>';
+      }).join("");
+    }
+    function renderQueue(data) {
+      const node = document.getElementById("queue");
+      const current = (data.snapshot && data.snapshot.current_product) || "当前商品";
+      const next = data.recommended_next_product || "等待商品池";
+      node.innerHTML = [["Now", current], ["Next", next], ["Action", normalizeAction(data.current_action)]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
+    }
+    function answerComment(text) {
+      if (/175|170|180|尺码|多大|kg|斤/.test(text)) return "175/70 正常 M，里面加卫衣建议 L。";
+      if (/真假|正品|真的假的/.test(text)) return "真假别听我空说，镜头拉近看吊牌、洗标、拉链和走线。";
+      if (/黑色|颜色|有码/.test(text)) return "想看黑色扣3，我等下直接拿近镜头给你看。";
+      if (/值|贵|价格/.test(text)) return "别光看价格，通勤能穿、场景多，买回去不会吃灰。";
+      return "这个问题我先记一下，具体尺码和颜色直接打出来。";
+    }
+    function renderComments() {
+      const input = document.getElementById("comments");
+      const node = document.getElementById("comment-replies");
+      const comments = input.value.split("\\n").map((line) => line.trim()).filter(Boolean).slice(0, 6);
+      node.innerHTML = comments.map((comment) => '<div class="reply"><b>' + escapeHtml(comment) + '</b><div>' + escapeHtml(answerComment(comment)) + '</div></div>').join("");
+    }
+    document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
+    document.getElementById("comments").addEventListener("input", renderComments);
+    setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    refreshSessions(); refreshDecision();
+    window.setInterval(refreshSessions, 10000);
+    window.setInterval(refreshDecision, 5000);
+    window.setInterval(renderComments, 5000);
+  </script>
+</body>
+</html>"""
+
+
 def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> str:
     if not rows:
         return ""
@@ -586,7 +786,7 @@ def _inject_report_history_banner(report_html: str, report_id: str) -> str:
     <section class="order-panel">
       <h2>报告已保存</h2>
       <p>报告 ID：{html.escape(report_id)}</p>
-      <p><a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+      <p><a href="/live">打开主播控制台</a> · <a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     </section>"""
     return report_html.replace("<main>", f"<main>{banner}", 1)
 
