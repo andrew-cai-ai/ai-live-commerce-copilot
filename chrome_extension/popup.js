@@ -77,54 +77,26 @@ function activeTabMatches(url) {
 }
 
 function inspectActiveTab() {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const tab = tabs && tabs[0] ? tabs[0] : {};
-    let host = "";
-    try {
-      host = new URL(tab.url || "").hostname;
-    } catch (_error) {
-      host = "";
+  chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INSPECT_TAB" }, (response) => {
+    if (chrome.runtime.lastError) {
+      updateStatus({ lastError: chrome.runtime.lastError.message }, refresh);
+      return;
     }
-    updateStatus({
-      activeTabUrl: tab.url || "",
-      activeTabHost: host || "--",
-      activeTabMatches: activeTabMatches(tab.url || "")
-    }, refresh);
+    updateStatus(response || {}, refresh);
   });
 }
 
 function injectCurrentTab() {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    const tab = tabs && tabs[0] ? tabs[0] : null;
-    if (!tab || !tab.id) {
-      updateStatus({ manualInjectStatus: "failed", lastError: "No active tab found." }, refresh);
-      return;
-    }
-    if (!activeTabMatches(tab.url || "")) {
+  updateStatus({ manualInjectStatus: "running", lastError: "" }, refresh);
+  chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INJECT_ACTIVE_TAB" }, (response) => {
+    if (chrome.runtime.lastError) {
       updateStatus({
         manualInjectStatus: "failed",
-        activeTabUrl: tab.url || "",
-        lastError: "Current tab is not a Taobao live backend page."
+        lastError: chrome.runtime.lastError.message
       }, refresh);
       return;
     }
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      files: ["content.js"]
-    }, () => {
-      if (chrome.runtime.lastError) {
-        updateStatus({
-          manualInjectStatus: "failed",
-          lastError: chrome.runtime.lastError.message
-        }, refresh);
-        return;
-      }
-      updateStatus({
-        manualInjectStatus: "success",
-        manualInjectedAt: Date.now(),
-        lastError: ""
-      }, refresh);
-    });
+    updateStatus(response || { manualInjectStatus: "failed", lastError: "No background response." }, refresh);
   });
 }
 
