@@ -106,15 +106,29 @@ function inspectActiveTabDirect(errorMessage) {
 
 function injectCurrentTab() {
   setText("manual-inject", "running", "warn");
-  updateStatus({ manualInjectStatus: "running", lastError: "", clickedAt: Date.now() }, () => {
-    injectCurrentTabDirect("");
-  });
+  setText("error", "--", "");
+  updateStatus({ manualInjectStatus: "running", lastError: "", clickedAt: Date.now() });
+  injectCurrentTabDirect("");
 }
 
 function injectCurrentTabDirect(reason) {
+  let completed = false;
+  window.setTimeout(() => {
+    if (!completed) {
+      setText("manual-inject", "failed", "bad");
+      setText("error", "chrome.tabs.query timed out. Reopen popup on the Taobao tab and try again.", "bad");
+      updateStatus({
+        manualInjectStatus: "failed",
+        lastError: "chrome.tabs.query timed out. Reopen popup on the Taobao tab and try again."
+      });
+    }
+  }, 1500);
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    completed = true;
     const tab = tabs && tabs[0] ? tabs[0] : null;
     if (!tab || !tab.id) {
+      setText("manual-inject", "failed", "bad");
+      setText("error", "No active tab found.", "bad");
       updateStatus({ manualInjectStatus: "failed", lastError: "No active tab found." }, refresh);
       return;
     }
@@ -125,6 +139,9 @@ function injectCurrentTabDirect(reason) {
       host = "";
     }
     if (!activeTabMatches(tab.url || "")) {
+      setText("active-tab", host || "--", "warn");
+      setText("manual-inject", "failed", "bad");
+      setText("error", "Current tab is not a Taobao/Tmall page.", "bad");
       updateStatus({
         activeTabId: tab.id,
         activeTabUrl: tab.url || "",
@@ -140,6 +157,9 @@ function injectCurrentTabDirect(reason) {
       files: ["content.js"]
     }, () => {
       if (chrome.runtime.lastError) {
+        setText("active-tab", host || "--", "good");
+        setText("manual-inject", "failed", "bad");
+        setText("error", chrome.runtime.lastError.message, "bad");
         updateStatus({
           activeTabId: tab.id,
           activeTabUrl: tab.url || "",
@@ -150,6 +170,9 @@ function injectCurrentTabDirect(reason) {
         }, refresh);
         return;
       }
+      setText("active-tab", host || "--", "good");
+      setText("manual-inject", "success", "good");
+      setText("error", reason || "--", reason ? "warn" : "");
       updateStatus({
         activeTabId: tab.id,
         activeTabUrl: tab.url || "",
