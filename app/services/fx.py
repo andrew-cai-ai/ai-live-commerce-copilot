@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_CAD_TO_CNY = 5.30
+DEFAULT_CAD_TO_CNY = 4.90
 FX_CACHE_PATH = Path("data/fx_rate_cache.json")
 FX_CACHE_TTL_SECONDS = 60 * 60 * 12
 
@@ -23,6 +23,7 @@ class FxRate:
     target_currency: str
     rate: float
     source: str
+    timestamp: float
     warning: str = ""
 
 
@@ -36,7 +37,7 @@ class FxRateService:
                 payload = self._fetch_payload(api_url, api_key)
                 rate = _extract_rate(payload)
                 if rate > 0:
-                    fx_rate = FxRate("CAD", "CNY", round(rate, 6), "live_fx_api")
+                    fx_rate = FxRate("CAD", "CNY", round(rate, 6), "live_fx_api", time.time())
                     _write_cached_rate(fx_rate)
                     return fx_rate
                 raise ValueError("FX response did not include a CAD to CNY rate.")
@@ -48,6 +49,7 @@ class FxRateService:
                         "CNY",
                         cached.rate,
                         "cached_fx_rate",
+                        cached.timestamp,
                         f"FX API failed, using cached CAD/CNY rate: {exc}",
                     )
                 return FxRate(
@@ -55,18 +57,20 @@ class FxRateService:
                     "CNY",
                     DEFAULT_CAD_TO_CNY,
                     "manual_fallback",
-                    f"FX API failed and no cached rate exists; using manual fallback 5.30: {exc}",
+                    time.time(),
+                    f"FX API failed and no cached rate exists; using manual fallback 4.90: {exc}",
                 )
 
         cached = _read_cached_rate()
         if cached:
-            return FxRate("CAD", "CNY", cached.rate, "cached_fx_rate")
+            return FxRate("CAD", "CNY", cached.rate, "cached_fx_rate", cached.timestamp)
         return FxRate(
             "CAD",
             "CNY",
             DEFAULT_CAD_TO_CNY,
             "manual_fallback",
-            "FX_API_URL is not configured; using manual fallback CAD/CNY rate 5.30.",
+            time.time(),
+            "FX_API_URL is not configured; using manual fallback CAD/CNY rate 4.90.",
         )
 
     def _fetch_payload(self, api_url: str, api_key: str) -> dict[str, Any]:
@@ -122,7 +126,7 @@ def _read_cached_rate() -> FxRate | None:
         rate = float(payload["rate"])
     except (KeyError, TypeError, ValueError):
         return None
-    return FxRate("CAD", "CNY", rate, "cached_fx_rate")
+    return FxRate("CAD", "CNY", rate, "cached_fx_rate", float(payload.get("timestamp", 0)))
 
 
 def _write_cached_rate(rate: FxRate) -> None:

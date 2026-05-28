@@ -316,7 +316,7 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
         "客户和主播都是中文用户，所有字段内容必须使用简体中文。"
         "请严格按结构化 JSON schema 返回。"
         "分数范围为 0 到 100。开场钩子约 15 秒，销售话术约 60 秒。"
-        "host_decision 只能是 Push hard、Mention briefly、Skip 三者之一。"
+        "host_decision 只能是 Push hard、短讲、过款、不做主推、Skip 之一。"
         "排序逻辑：market_popularity 35%、sellability 30%、profit_margin 15%、inventory_priority 10%、competition_score 10%。"
         "必须优先考虑直播转化和主流需求，不要因为毛利高就过度推荐小众高客单产品。"
         "直播话术要像真实中文直播间，不要像广告文案，不要写 high-quality materials 这类泛词。"
@@ -365,7 +365,7 @@ def _report_json_schema() -> dict[str, Any]:
             "recommendation_score": {"type": "number"},
             "host_decision": {
                 "type": "string",
-                "enum": ["Push hard", "Mention briefly", "Skip"],
+                "enum": ["Push hard", "短讲", "过款", "不做主推", "Skip"],
             },
             "comparison_with_similar_products": {"type": "array", "items": {"type": "string"}},
             "suggested_image_evidence": {"type": "array", "items": {"type": "string"}},
@@ -400,7 +400,7 @@ def _merge_report(product: ScoredProduct, reports: list[dict[str, Any]]) -> dict
     match = next((report for report in reports if report.get("product_name") == product.product_name), {})
     merged = fallback | {key: value for key, value in match.items() if value}
     merged["product_name"] = product.product_name
-    merged["host_decision"] = _fallback_host_decision(product.score)
+    merged["host_decision"] = _fallback_host_decision(product.score, product)
     return merged
 
 
@@ -422,7 +422,7 @@ def _fallback_product_report(product: ScoredProduct) -> dict[str, Any]:
         "product_name": product.product_name,
         "product_heat_score": heat_score,
         "recommendation_score": recommendation_score,
-        "host_decision": _fallback_host_decision(product.score),
+        "host_decision": _fallback_host_decision(product.score, product),
         "core_selling_points": knowledge.likely_selling_points
         if knowledge
         else ["始祖鸟技术产品定位清晰", "户外和通勤需求都容易理解", "适合直播间做场景化讲解"],
@@ -541,12 +541,20 @@ def _script_style_template(normalized_name: str) -> dict[str, str]:
     }
 
 
-def _fallback_host_decision(score: float) -> str:
+def _fallback_host_decision(score: float, product: ScoredProduct | None = None) -> str:
+    if product and (
+        product.profit_margin < 0
+        or product.stock <= 0
+        or (_real_evidence_count(product) == 0 and product.sellability.score < 0.35)
+    ):
+        return "Skip"
     if score >= 0.72:
         return "Push hard"
     if score >= 0.5:
-        return "Mention briefly"
-    return "Skip"
+        return "短讲"
+    if score >= 0.35:
+        return "过款"
+    return "不做主推"
 
 
 def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
@@ -567,9 +575,10 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         {_metric("成本", _money(product.cost, "CNY"))}
         {_metric("原始成本", _source_currency_label(product.original_cost, product.cost_currency))}
         {_metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY")}
+        {_metric("汇率来源", _fx_source_label(product))}
         {_metric("目标售价", _money(product.target_selling_price, "CNY"))}
         {_metric("毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
-        {_metric("市场价差", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
+        {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
         {_metric("库存", str(product.stock))}
         {_metric("平台热度", f"{product.popularity_score:.2f}")}
@@ -629,6 +638,34 @@ def _fx_warning(product: ScoredProduct) -> str:
     if not product.fx_warning:
         return ""
     return f'<div class="warning"><b>汇率提示</b><p>{html.escape(product.fx_warning)}</p></div>'
+
+
+def _fx_source_label(product: ScoredProduct) -> str:
+    labels = {
+        "live_fx_api": "实时 FX API",
+        "cached_fx_rate": "缓存汇率",
+        "manual_fallback": "手动 fallback",
+    }
+    timestamp = _format_timestamp(product.fx_timestamp)
+    return f"{labels.get(product.fx_source, product.fx_source)} · {timestamp}"
+
+
+def _format_timestamp(timestamp: float) -> str:
+    if not timestamp:
+        return "N/A"
+    try:
+        from datetime import datetime
+
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return "N/A"
+
+
+def _real_evidence_count(product: ScoredProduct) -> int:
+    market = product.market_research
+    if not market:
+        return 0
+    return len(market.price_results) + sum(len(signal.evidence_posts) for signal in market.social_signals)
 
 
 def _collapsed_section(title: str, body: str) -> str:
@@ -789,7 +826,7 @@ def _render_live_mode_dashboard() -> str:
           <div class="action-card" id="action-push">Push harder</div>
           <div class="action-card" id="action-sizing">Explain sizing</div>
           <div class="action-card" id="action-auth">Show authenticity proof</div>
-          <div class="action-card" id="action-skip">Skip product</div>
+          <div class="action-card" id="action-skip">不做主推</div>
           <div class="action-card" id="action-topic">Change topic</div>
         </div>
         <div class="suggestions">
@@ -1234,7 +1271,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return "Switch product";
         }
         if (score < 0.24 && metrics.watch_time < 25 && conversionRate < 0.01) {
-          return "Skip product";
+          return "不做主推";
         }
         if (addCartRate >= 0.05 || (score >= 0.62 && conversionRate >= 0.025)) {
           return "Push harder";
@@ -1275,8 +1312,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (decision === "Explain value/price") {
           return "别光看价格，我说实话，这件贵在哪、适合谁我直接讲明白。";
         }
-        if (decision === "Skip product") {
-          return "这件今天先不硬推，库存和反馈不够好，我们换一件更好卖的。";
+        if (decision === "不做主推") {
+          return "这件今天不做主推，简单过一下，马上切到更容易成交的。";
         }
         if (decision === "Change topic") {
           return "先别急着拍，我换个场景讲，平时通勤到底能不能穿。";
@@ -1301,7 +1338,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           "Continue product": "继续讲当前商品",
           "Switch product": "切换下一件",
           "Push harder": "加速逼单",
-          "Skip product": "跳过这件",
+          "不做主推": "不做主推",
           "Change topic": "换话题保停留",
           "Explain value/price": "解释价值和价格",
           "Explain sizing": "开始讲尺码",
@@ -1377,7 +1414,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (decision === "Show authenticity") {
           return "action-auth";
         }
-        if (decision === "Skip product") {
+        if (decision === "不做主推") {
           return "action-skip";
         }
         if (decision === "Change topic" || decision === "Explain value/price") {
@@ -1622,7 +1659,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (text.includes("authenticity")) { return "Show authenticity"; }
         if (text.includes("sizing")) { return "Explain sizing"; }
         if (text.includes("push")) { return "Push harder"; }
-        if (text.includes("skip")) { return "Skip product"; }
+        if (text.includes("skip") || text.includes("不做主推")) { return "不做主推"; }
         if (text.includes("topic")) { return "Change topic"; }
         return "Continue product";
       }
@@ -1651,7 +1688,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? "Using Chrome Extension Taobao live connector · updates every 5s"
             : data.source === "page_payload"
             ? "Using pasted/manual live payload via connector · updates every 5s"
-            : "Using mock connector data · configure LIVE_METRICS_API_URL for real API"
+            : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
         );
         document.getElementById("viewer-count").textContent = Math.round(metrics.viewer_count).toLocaleString();
         document.getElementById("ctr").textContent = formatPercent(metrics.item_click_rate);
@@ -1804,7 +1841,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         });
         const others = sorted.filter(function(product) { return product.name !== current.name; });
         let queue = [current].concat(others);
-        if (decision.decision === "Switch product" || decision.decision === "Skip product") {
+        if (decision.decision === "Switch product" || decision.decision === "不做主推") {
           queue = others.concat([current]);
         }
         while (queue.length < 4 && queue.length) {
@@ -1841,10 +1878,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function updateHostAssistant(metrics, decision) {
         decision = decision || buildDecisionReasons(metrics);
-        if (hostProducts.length && (decision.decision === "Switch product" || decision.decision === "Skip product")) {
+        if (hostProducts.length && (decision.decision === "Switch product" || decision.decision === "不做主推")) {
           hostProductIndex = Math.min(hostProductIndex + 1, hostProducts.length - 1);
         }
-        const currentProduct = (decision.decision === "Switch product" || decision.decision === "Skip product")
+        const currentProduct = (decision.decision === "Switch product" || decision.decision === "不做主推")
           ? (hostProducts[hostProductIndex] || metrics.item_name || "等待商品")
           : (metrics.item_name || hostProducts[hostProductIndex] || "等待商品");
         document.getElementById("host-current-product").textContent = currentProduct;
@@ -1926,7 +1963,7 @@ def _livestream_order(
     if not products:
         return {}
 
-    decision_priority = {"Push hard": 0, "Mention briefly": 1, "Skip": 2}
+    decision_priority = {"Push hard": 0, "短讲": 1, "过款": 2, "不做主推": 3, "Skip": 4}
     ordered = sorted(
         products,
         key=lambda product: (
@@ -1939,12 +1976,12 @@ def _livestream_order(
     non_skip = [
         product
         for product in ordered
-        if report_by_name[product.product_name]["host_decision"] != "Skip"
+        if report_by_name[product.product_name]["host_decision"] not in {"Skip", "不做主推"}
     ]
     skip = [
         product
         for product in ordered
-        if report_by_name[product.product_name]["host_decision"] == "Skip"
+        if report_by_name[product.product_name]["host_decision"] in {"Skip", "不做主推"}
     ]
     ordered = non_skip + skip
 
@@ -1955,9 +1992,9 @@ def _livestream_order(
 
     return {
         "Start product": (start_product, "Push hard / easiest conversion"),
-        "Second product": (second_product, "Push hard or Mention briefly / traffic builder"),
+        "Second product": (second_product, "Push hard or 短讲 / traffic builder"),
         "Third product": (third_product, "profit or secondary mention"),
-        "Final product": (final_product, "premium closer or Skip product held to the end"),
+        "Final product": (final_product, "premium closer or non-primary product held to the end"),
     }
 
 
@@ -1991,7 +2028,7 @@ def _render_post_live_analysis(products: list[ScoredProduct]) -> str:
     reasons = [
         f"最佳商品 {best_product.product_name}：流量={best_product.traffic_score:.2f}，转化={best_product.conversion_score:.2f}，GMV={best_product.gmv_level}。",
         f"最弱商品 {worst_product.product_name}：转化难度={worst_product.sellability.conversion_difficulty:.2f}，建议减少讲解时长。",
-        "Skip 产品不要放前段，避免刚开场损失在线和互动。",
+        "不做主推/过款产品不要放前段，避免刚开场损失在线和互动。",
     ]
     suggestions = [
         "下一场先用 Push hard 商品开场，快速拉互动和加购。",
@@ -2268,8 +2305,10 @@ def _link_list(urls: list[str]) -> str:
 def _decision_label(decision: str) -> str:
     labels = {
         "Push hard": "重点主推",
-        "Mention briefly": "简短提及",
-        "Skip": "今日跳过",
+        "短讲": "简短讲",
+        "过款": "快速过款",
+        "不做主推": "不做主推",
+        "Skip": "硬跳过",
     }
     return labels.get(decision, "待判断")
 
@@ -2308,5 +2347,5 @@ def _market_price_label(value: float | None, currency: str = "CNY") -> str:
     if currency == "USD":
         return f"{original} USD (~{_money(value * 7.25, 'CNY')} CNY)"
     if currency == "CAD":
-        return f"{original} CAD (~{_money(value * 5.30, 'CNY')} CNY)"
+        return f"{original} CAD (~{_money(value * 4.90, 'CNY')} CNY)"
     return f"{original} CNY"

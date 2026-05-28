@@ -159,8 +159,8 @@ class LiveDataConnector:
         if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
             return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
 
-        warnings.append("LIVE_METRICS_API_URL is not configured; using mock live data.")
-        return _mock_payload(), "mock"
+        warnings.append("No live metrics connector data found.")
+        return {}, "no_connector"
 
     def _build_snapshot(self, data: dict[str, Any], source: str) -> LiveMetricSnapshot:
         total_stats = _find_dict(data, "totalStats") or data

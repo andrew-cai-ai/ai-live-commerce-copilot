@@ -15,7 +15,7 @@ from app.providers.google_shopping_provider import GoogleShoppingProvider
 from app.providers.xiaohongshu_provider import XiaohongshuProvider
 
 USD_TO_CNY = 7.25
-CAD_TO_CNY = 5.30
+CAD_TO_CNY = 4.90
 
 
 class MarketResearchService:

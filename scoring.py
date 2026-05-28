@@ -47,6 +47,7 @@ class ScoredProduct:
     target_currency: str
     cad_to_cny_rate: float
     fx_source: str
+    fx_timestamp: float
     fx_warning: str
     stock: int
     target_selling_price: float
@@ -211,6 +212,7 @@ def score_products(
                 target_currency=item.target_currency,
                 cad_to_cny_rate=fx_rate.rate,
                 fx_source=fx_rate.source,
+                fx_timestamp=fx_rate.timestamp,
                 fx_warning=fx_rate.warning,
                 stock=inventory_units,
                 target_selling_price=target_selling_price,

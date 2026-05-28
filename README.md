@@ -54,7 +54,7 @@ For external users, deploy to Render. This repo includes `render.yaml`; push to 
 
 ## Currency
 
-Inventory cost is treated as CAD by default. Target selling price is treated as CNY. The app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 5.30 CNY` and shows a warning in the report.
+Inventory cost is treated as CAD by default. Target selling price is treated as CNY. The app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 4.90 CNY` and shows a warning in the report.
 
 ## History, Export, and Cache
 
@@ -191,7 +191,7 @@ Current realtime rules:
 - `sizing_questions > 3`: Explain sizing
 - `add_to_cart_rate > 5%`: Create urgency
 
-Livestream order follows host decision priority: `Push hard` > `Mention briefly` > `Skip for today`, so Skip products stay late.
+Livestream order follows host decision priority: `Push hard` > `短讲` > `过款` > `不做主推` > `Skip`, so non-primary products stay late.
 
 The report includes a Post-Live Analysis section with total viewers, estimated GMV, best product, worst product, reasons, and next livestream suggestions.
 
