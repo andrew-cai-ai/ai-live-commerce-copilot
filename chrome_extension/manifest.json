@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "AI Live Director Taobao Connector",
+  "version": "0.1.0",
+  "description": "Captures Taobao live assistant metric responses and sends normalized metrics to the local AI Live Director.",
+  "permissions": [],
+  "host_permissions": [
+    "*://*.taobao.com/*",
+    "*://*.tmall.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.taobao.com/*",
+        "*://*.tmall.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page_hook.js"],
+      "matches": [
+        "*://*.taobao.com/*",
+        "*://*.tmall.com/*"
+      ]
+    }
+  ]
+}

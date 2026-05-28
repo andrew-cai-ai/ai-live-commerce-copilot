@@ -59,6 +59,7 @@ class LiveMetricSnapshot:
     item_add_cart_rate: float = 0.0
     item_gmv: float = 0.0
     current_product: str = ""
+    product_level_connected: bool = False
     product_events: list[ProductEvent] = field(default_factory=list)
     authenticity_comments: int = 0
     sizing_comments: int = 0
@@ -74,6 +75,7 @@ class LiveDecision:
     next_action: str
     recommended_next_product: str
     recent_product_winners: list[ProductEvent]
+    product_level_connected: bool
     livestream_mode: str
     product_health: dict[str, Any]
     switch_recommendation: dict[str, Any]
@@ -96,6 +98,8 @@ class LiveDataConnector:
         self.timeout = float(os.getenv("LIVE_METRICS_API_TIMEOUT", "5"))
         self.snapshots: list[LiveMetricSnapshot] = []
         self.action_history: list[dict[str, Any]] = []
+        self.latest_ingested_payload: dict[str, Any] | None = None
+        self.latest_ingested_at: float = 0.0
 
     def get_decision(
         self,
@@ -112,6 +116,11 @@ class LiveDataConnector:
         self._record_action(decision)
         decision.warnings.extend(warnings)
         return decision
+
+    def ingest_live_metrics(self, payload: dict[str, Any]) -> LiveDecision:
+        self.latest_ingested_payload = payload
+        self.latest_ingested_at = time.time()
+        return self.get_decision(payload=payload)
 
     def _record_action(self, decision: LiveDecision) -> None:
         entry = _timeline_entry(decision)
@@ -147,6 +156,9 @@ class LiveDataConnector:
         if payload:
             return _unwrap_payload(payload), "page_payload"
 
+        if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
+            return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
+
         warnings.append("LIVE_METRICS_API_URL is not configured; using mock live data.")
         return _mock_payload(), "mock"
 
@@ -157,6 +169,22 @@ class LiveDataConnector:
         comments = _comment_text(data)
         ipv_uv_rate = _normalize_rate(_pick(total_stats, "ipv_uv_rate", "ipvUvRate"))
         pay_byr_rate = _normalize_rate(_pick(total_stats, "pay_byr_rate", "payByrRate"))
+        explicit_product_metrics = any(
+            _pick(data, key) is not None
+            for key in (
+                "item_name",
+                "itemName",
+                "item_click_rate",
+                "itemClickRate",
+                "item_conversion_rate",
+                "itemConversionRate",
+                "item_add_cart_rate",
+                "itemAddCartRate",
+                "item_gmv",
+                "itemGmv",
+                "jiangJieEffect",
+            )
+        )
         return LiveMetricSnapshot(
             timestamp=time.time(),
             online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv") or _pick(total_stats, "uv")),
@@ -184,6 +212,7 @@ class LiveDataConnector:
             item_add_cart_rate=_normalize_rate(_pick(data, "item_add_cart_rate", "itemAddCartRate", "cart_rate")),
             item_gmv=_to_number(_pick(data, "item_gmv", "itemGmv") or _pick(data_region, "pay_amt_5min_d_live") or _pick(total_stats, "pay_amt")),
             current_product=str(_pick(data, "current_product", "item_name", "itemName") or _best_event_title(events)).strip(),
+            product_level_connected=explicit_product_metrics,
             product_events=events,
             authenticity_comments=int(_to_number(_pick(data, "authenticity_comments", "authenticity_questions"))) or _count_authenticity_comments(comments),
             sizing_comments=int(_to_number(_pick(data, "sizing_comments", "sizing_questions"))) or _count_sizing_comments(comments),
@@ -227,6 +256,7 @@ class LiveDataConnector:
         current_live_score = _current_live_score(snapshot)
         valid_live_metrics = _has_valid_live_metrics(snapshot)
         recent_winners = _recent_product_winners(snapshot.product_events)
+        product_level_connected = _has_product_level_metrics(snapshot)
         recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
         product_health = _product_health(snapshot, trend_30s, trend_60s)
         comment_clusters = _comment_clusters(snapshot, snapshot.comment_text or _comment_text_from_snapshot(snapshot))
@@ -240,6 +270,21 @@ class LiveDataConnector:
             reason = ["online_uv=0", "heat_score=0", "pay_amt=0"]
             confidence = 0.0
             livestream_mode = "No valid live metrics"
+        elif snapshot.sizing_comments > 0:
+            current_action = "switch to sizing explanation"
+            next_action = "集中讲尺码、身高体重和内搭建议"
+            reason = ["comment keywords include size/尺码/身高体重", "sizing is blocking conversion", "answer sizing now"]
+            confidence = 0.86
+        elif snapshot.authenticity_comments > 0:
+            current_action = "show authenticity proof"
+            next_action = "展示吊牌、洗标、拉链和细节"
+            reason = ["comment keywords include 真假/正品", "trust is blocking conversion", "show proof now"]
+            confidence = 0.86
+        elif trend_30s["online_uv"] == "up" and trend_30s["heat_score"] == "up" and trend_30s["pay_amt"] == "up":
+            current_action = "continue product"
+            next_action = "继续讲当前商品，别拉长解释，直接承接成交势能"
+            reason = ["online_uv up", "heat_score up", "pay_amt up"]
+            confidence = 0.86
         elif snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
             current_action = "switch product"
             next_action = "切到下一件更容易成交的商品"
@@ -276,16 +321,6 @@ class LiveDataConnector:
             next_action = "解释价格、价值和使用场景"
             reason = ["item_click_rate 30s up", "item_conversion_rate 30s down", "users are interested but not paying"]
             confidence = 0.80
-        elif snapshot.authenticity_comments > 3:
-            current_action = "show authenticity proof"
-            next_action = "展示吊牌、洗标、拉链和细节"
-            reason = ["authenticity comments above threshold", "trust is blocking conversion", "show real evidence now"]
-            confidence = 0.86
-        elif snapshot.sizing_comments > 3:
-            current_action = "switch to sizing explanation"
-            next_action = "集中讲尺码、身高体重和内搭建议"
-            reason = ["sizing comments above threshold", "fit questions are increasing", "answer before pushing order"]
-            confidence = 0.84
         else:
             reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
@@ -296,6 +331,7 @@ class LiveDataConnector:
             next_action=next_action,
             recommended_next_product=recommended_next_product,
             recent_product_winners=recent_winners,
+            product_level_connected=product_level_connected,
             livestream_mode=livestream_mode,
             product_health=product_health,
             switch_recommendation=switch_recommendation,
@@ -613,6 +649,10 @@ def _has_valid_live_metrics(snapshot: LiveMetricSnapshot) -> bool:
         and snapshot.pay_amt_5min_d_live <= 0
         and sum(event.payBuyerCnt for event in snapshot.product_events) <= 0
     )
+
+
+def _has_product_level_metrics(snapshot: LiveMetricSnapshot) -> bool:
+    return snapshot.product_level_connected
 
 
 def _product_health(

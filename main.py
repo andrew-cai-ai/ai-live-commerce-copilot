@@ -6,6 +6,7 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from report import generate_product_reports, render_report_page
@@ -23,6 +24,12 @@ from app.services.taobao_live_scoring import TaobaoLiveScoringService
 from scoring import parse_manual_research_overrides, score_products
 
 app = FastAPI(title="直播选品助手")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
 live_data_connector = LiveDataConnector()
 
 EXAMPLE_INVENTORY = ""
@@ -125,6 +132,25 @@ async def live_decision(request: Request) -> dict[str, Any]:
         products=body.get("products"),
     )
     return asdict(decision)
+
+
+@app.post("/live-metrics")
+async def live_metrics(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    decision = live_data_connector.ingest_live_metrics(payload)
+    return {
+        "ok": True,
+        "source": "chrome_extension",
+        "valid_live_metrics": decision.valid_live_metrics,
+        "current_action": decision.current_action,
+        "livestream_mode": decision.livestream_mode,
+        "snapshot_count": len(live_data_connector.snapshots),
+    }
 
 
 @app.post("/analyze", response_class=HTMLResponse)

@@ -1634,6 +1634,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
             : data.source === "real_api"
             ? "Using real live metrics API · updates every 5s"
+            : data.source === "chrome_extension"
+            ? "Using Chrome Extension Taobao live connector · updates every 5s"
             : data.source === "page_payload"
             ? "Using pasted/manual live payload via connector · updates every 5s"
             : "Using mock connector data · configure LIVE_METRICS_API_URL for real API"
@@ -1647,7 +1649,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
-        document.getElementById("live-jiangjie-effect").textContent = "--";
+        document.getElementById("live-jiangjie-effect").textContent = data.product_level_connected ? "--" : "Product-level metrics not connected yet.";
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
         document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";
