@@ -222,6 +222,22 @@ class LiveDataConnector:
             ),
         }
 
+    def boss_dashboard(self) -> dict[str, Any]:
+        sessions = self.active_sessions()
+        active = [session for session in sessions if _session_age(session) <= 120]
+        risks = [_boss_risk_card(session) for session in active]
+        risks = [risk for risk in risks if risk["level"] != "ok"]
+        ranked = sorted(active, key=lambda item: float(item.get("pay_amt") or 0), reverse=True)
+        return {
+            "active_count": len(active),
+            "valid_count": len([session for session in active if session.get("valid_live_metrics")]),
+            "total_gmv": sum(float(session.get("pay_amt") or 0) for session in active),
+            "risk_count": len(risks),
+            "top_room": ranked[0] if ranked else None,
+            "risk_rooms": risks[:8],
+            "rooms": [_boss_room_card(session) for session in active[:20]],
+        }
+
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
         clean_host_id = _clean_host_id(host_id)
         session = self._session(clean_host_id)
@@ -756,6 +772,99 @@ def _post_live_summary(
         "pay_delta": pay_delta,
         "viewer_delta": viewer_delta,
     }
+
+
+def _boss_room_card(session: dict[str, Any]) -> dict[str, Any]:
+    score = _host_execution_score(session)
+    return {
+        "host_id": session.get("host_id", "default"),
+        "display_name": session.get("display_name") or session.get("host_id", "default"),
+        "pay_amt": float(session.get("pay_amt") or 0),
+        "online_uv": float(session.get("online_uv") or 0),
+        "heat_score": float(session.get("heat_score") or 0),
+        "ctr": float(session.get("ipv_uv_rate") or 0),
+        "cvr": float(session.get("pay_byr_rate") or 0),
+        "current_action": session.get("current_action") or "--",
+        "current_product": session.get("current_product") or "--",
+        "execution_score": score,
+        "age_seconds": session.get("age_seconds"),
+        "extension_update_available": bool(session.get("extension_update_available")),
+    }
+
+
+def _boss_risk_card(session: dict[str, Any]) -> dict[str, Any]:
+    ctr = float(session.get("ipv_uv_rate") or 0)
+    cvr = float(session.get("pay_byr_rate") or 0)
+    online_uv = float(session.get("online_uv") or 0)
+    pay_amt = float(session.get("pay_amt") or 0)
+    age = _session_age(session)
+    level = "ok"
+    reason = "数据健康"
+    action = "继续观察"
+    estimated_loss = 0.0
+    if age > 60:
+        level = "high"
+        reason = "插件数据超过 60 秒未更新"
+        action = "联系主播刷新淘宝中控或插件"
+    elif ctr >= 0.08 and cvr < 0.02:
+        level = "high"
+        reason = "点击高但成交低，价格价值没有讲透"
+        action = "立刻让主播解释价格、通勤场景和不吃灰价值"
+        estimated_loss = max(300.0, online_uv * ctr * 80)
+    elif online_uv >= 50 and pay_amt <= 0:
+        level = "high"
+        reason = "在线人数有量但没有成交"
+        action = "切到更容易成交的商品，或做限时逼单"
+        estimated_loss = max(500.0, online_uv * 20)
+    elif session.get("extension_update_available"):
+        level = "medium"
+        reason = "主播插件不是最新版"
+        action = "下播后让主播重新下载安装插件"
+    elif ctr < 0.03 and online_uv > 20:
+        level = "medium"
+        reason = "点击偏低，商品开场吸引力不足"
+        action = "换更强开场钩子，镜头拉近展示细节"
+    return {
+        "level": level,
+        "host_id": session.get("host_id", "default"),
+        "display_name": session.get("display_name") or session.get("host_id", "default"),
+        "reason": reason,
+        "action": action,
+        "estimated_loss": estimated_loss,
+    }
+
+
+def _host_execution_score(session: dict[str, Any]) -> int:
+    score = 70
+    ctr = float(session.get("ipv_uv_rate") or 0)
+    cvr = float(session.get("pay_byr_rate") or 0)
+    heat = float(session.get("heat_score") or 0)
+    age = _session_age(session)
+    if ctr >= 0.08:
+        score += 10
+    elif ctr < 0.03:
+        score -= 10
+    if cvr >= 0.025:
+        score += 12
+    elif ctr >= 0.08 and cvr < 0.02:
+        score -= 12
+    if heat >= 500:
+        score += 6
+    if age > 60:
+        score -= 15
+    if session.get("extension_update_available"):
+        score -= 4
+    return max(0, min(100, score))
+
+
+def _session_age(session: dict[str, Any]) -> float:
+    value = session.get("age_seconds")
+    if value is None:
+        return 9999.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 9999.0
 
 
 def _time_label(timestamp: Any) -> str:

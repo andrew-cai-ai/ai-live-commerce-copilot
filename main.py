@@ -129,6 +129,20 @@ def admin_live(request: Request) -> str:
     return _render_admin_live()
 
 
+@app.get("/boss", response_class=HTMLResponse)
+def boss_dashboard(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_boss_dashboard()
+
+
+@app.get("/api/boss/dashboard")
+async def boss_dashboard_api(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_data_connector.boss_dashboard()
+
+
 @app.get("/admin/live/{host_id}", response_class=HTMLResponse)
 def admin_live_detail(request: Request, host_id: str) -> str:
     if not is_authenticated(request):
@@ -548,7 +562,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/live">打开主播控制台</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/boss">老板总控看板</a> · <a href="/live">打开主播控制台</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -1204,6 +1218,112 @@ def _render_admin_live() -> str:
           + '<div class="metrics">' + metrics + '</div>'
           + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a><a class="button" href="' + detailUrl + '">查看趋势/导出</a></div>'
           + '</article>';
+      }).join("");
+    }
+    refresh();
+    window.setInterval(refresh, 5000);
+  </script>
+</body>
+</html>"""
+
+
+def _render_boss_dashboard() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>老板总控看板</title>
+  <style>
+    :root { color-scheme: light; --ink: #111827; --muted: #66736f; --line: #d8e1dd; --paper: #f5f8f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; --warn: #a16207; --danger: #b42318; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }
+    main { max-width: 1280px; margin: 0 auto; padding: 28px 18px 56px; }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 34px; }
+    a { color: var(--accent); text-decoration: none; font-weight: 900; }
+    .small { color: var(--muted); font-size: 13px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .card, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .card span { display: block; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    .card b { display: block; font-size: 34px; margin-top: 4px; }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .risk { border: 1px solid var(--line); border-left: 6px solid var(--warn); border-radius: 8px; padding: 12px; background: #fff; margin-top: 8px; }
+    .risk.high { border-left-color: var(--danger); }
+    .risk b { display: block; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; min-width: 780px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 9px; text-align: left; font-size: 13px; }
+    th { color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow-x: auto; }
+    .score { font-weight: 950; color: var(--accent); }
+    .button { display: inline-flex; border-radius: 8px; background: var(--accent); color: #fff; padding: 7px 9px; }
+    @media (max-width: 900px) { .kpis, .layout { grid-template-columns: 1fr; } header { display: block; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><h1>老板总控看板</h1><div class="small">实时看钱、看风险、看主播执行力</div></div>
+      <div><a href="/admin/live">直播监控后台</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
+    </header>
+    <section class="kpis">
+      <div class="card"><span>在线直播间</span><b id="active-count">--</b></div>
+      <div class="card"><span>有效数据</span><b id="valid-count">--</b></div>
+      <div class="card"><span>当前 GMV</span><b id="total-gmv">--</b></div>
+      <div class="card"><span>风险直播间</span><b id="risk-count">--</b></div>
+    </section>
+    <section class="layout">
+      <div class="panel">
+        <h2>老板需要关注</h2>
+        <div id="risk-list"><div class="small">等待数据...</div></div>
+      </div>
+      <div class="panel">
+        <h2>今日最佳直播间</h2>
+        <div id="top-room" class="small">等待数据...</div>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px;">
+      <h2>主播执行评分</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>直播间</th><th>评分</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>最新动作</th><th>操作</th></tr></thead>
+          <tbody id="room-rows"><tr><td colspan="8">等待数据...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
+    function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    async function refresh() {
+      const response = await fetch("/api/boss/dashboard");
+      const data = await response.json();
+      document.getElementById("active-count").textContent = fmtNumber(data.active_count);
+      document.getElementById("valid-count").textContent = fmtNumber(data.valid_count);
+      document.getElementById("total-gmv").textContent = fmtMoney(data.total_gmv);
+      document.getElementById("risk-count").textContent = fmtNumber(data.risk_count);
+      renderRisks(data.risk_rooms || []);
+      renderTopRoom(data.top_room);
+      renderRooms(data.rooms || []);
+    }
+    function renderRisks(risks) {
+      const node = document.getElementById("risk-list");
+      if (!risks.length) { node.innerHTML = '<div class="small">当前没有高风险直播间。</div>'; return; }
+      node.innerHTML = risks.map((risk) => '<div class="risk ' + (risk.level === "high" ? "high" : "") + '"><b>' + escapeHtml(risk.display_name) + '</b><div>' + escapeHtml(risk.reason) + '</div><div class="small">建议：' + escapeHtml(risk.action) + '</div><div class="small">预计机会损失：' + fmtMoney(risk.estimated_loss) + '</div></div>').join("");
+    }
+    function renderTopRoom(room) {
+      const node = document.getElementById("top-room");
+      if (!room) { node.textContent = "等待数据..."; return; }
+      node.innerHTML = '<h3>' + escapeHtml(room.display_name || room.host_id) + '</h3><p>当前 GMV：<b>' + fmtMoney(room.pay_amt) + '</b></p><p>在线：' + fmtNumber(room.online_uv) + ' · CTR ' + fmtPercent(room.ipv_uv_rate) + ' · CVR ' + fmtPercent(room.pay_byr_rate) + '</p>';
+    }
+    function renderRooms(rooms) {
+      const node = document.getElementById("room-rows");
+      if (!rooms.length) { node.innerHTML = '<tr><td colspan="8">等待数据...</td></tr>'; return; }
+      node.innerHTML = rooms.map((room) => {
+        const url = "/admin/live/" + encodeURIComponent(room.host_id);
+        return '<tr><td>' + escapeHtml(room.display_name) + '</td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a></td></tr>';
       }).join("");
     }
     refresh();
