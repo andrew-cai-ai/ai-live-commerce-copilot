@@ -1115,10 +1115,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         return metrics;
       }
 
-      function findAssistantData(payload) {
-        if (!payload || typeof payload !== "object") {
+      function normalizeAssistantPayload(raw) {
+        if (!raw || typeof raw !== "object") {
           return null;
         }
+        const payload = raw.data && typeof raw.data === "object" ? raw.data : raw;
         if (payload.data && typeof payload.data === "object") {
           if (payload.data.data && typeof payload.data.data === "object") {
             return payload.data.data;
@@ -1137,8 +1138,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return null;
         }
         try {
-          const payload = JSON.parse(input.value);
-          return findAssistantData(payload);
+          const raw = JSON.parse(input.value);
+          const payload = normalizeAssistantPayload(raw);
+          console.log("raw payload", raw);
+          console.log("normalized payload", payload);
+          console.log("online_uv", payload && payload.online_uv);
+          return payload;
         } catch (error) {
           return { parse_error: true, error_message: error.message };
         }
@@ -1175,11 +1180,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           updateParsedMetricsDebug(null, "--");
           return null;
         }
+        const payloadHasValidMetrics = hasValidNormalizedPayload(payload);
         const metrics = buildMetricsFromAssistantData(payload);
         metrics.source = "pasted_payload";
         liveDirectorState.latestPayload = payload;
         liveDirectorState.latestMetrics = metrics;
-        liveDirectorState.hasValidPastedPayload = hasValidLiveMetrics(metrics);
+        liveDirectorState.hasValidPastedPayload = payloadHasValidMetrics || hasValidLiveMetrics(metrics);
         if (liveDirectorState.hasValidPastedPayload) {
           updateParsedMetricsDebug(metrics, "pasted_payload");
           renderLiveDecision(metrics);
@@ -1197,6 +1203,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           || metrics.ipv_uv_rate > 0
           || metrics.pay_byr_rate > 0
           || metrics.watch_time > 0
+        );
+      }
+
+      function hasValidNormalizedPayload(payload) {
+        return !!payload && (
+          toNumber(payload.online_uv) > 0
+          || toNumber(payload.pay_amt) > 0
+          || toNumber(payload.heat_score) > 0
         );
       }
 
