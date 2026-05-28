@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.providers.base import ManualResearchOverride, MarketResearchResult
+from app.services.fx import FxRateService
 from app.services.market_research import MarketResearchService
 from search import ProductKnowledge, get_product_knowledge
 
@@ -23,6 +24,8 @@ class InventoryItem:
     color: str = ""
     notes: str = ""
     source: str = "manual"
+    cost_currency: str = "CAD"
+    target_currency: str = "CNY"
 
 
 @dataclass
@@ -39,6 +42,12 @@ class SellabilityScore:
 class ScoredProduct:
     product_name: str
     cost: float
+    original_cost: float
+    cost_currency: str
+    target_currency: str
+    cad_to_cny_rate: float
+    fx_source: str
+    fx_warning: str
     stock: int
     target_selling_price: float
     profit: float
@@ -135,6 +144,7 @@ def score_products(
 ) -> list[ScoredProduct]:
     raw_rows = []
     market_research_service = MarketResearchService()
+    fx_rate = FxRateService().get_cad_to_cny_rate()
     manual_overrides = manual_overrides or {}
 
     for item in items:
@@ -144,26 +154,29 @@ def score_products(
             raise ValueError(f"{item.product_name}: 库存不能为负数。")
 
         knowledge = get_product_knowledge(item.product_name)
-        target_selling_price = item.target_selling_price if item.target_selling_price > 0 else _default_target_price(item.cost)
+        cost_cny = _convert_cost_to_cny(item.cost, item.cost_currency, fx_rate.rate)
+        target_selling_price = item.target_selling_price if item.target_selling_price > 0 else _default_target_price(cost_cny)
         market_research = market_research_service.research_product(
             product_name=item.product_name,
             target_selling_price=target_selling_price,
             manual_override=_find_manual_override(item.product_name, manual_overrides),
         )
-        target_selling_price = _resolve_target_price(item, market_research)
-        profit = target_selling_price - item.cost
+        if fx_rate.warning:
+            market_research.warnings.append(fx_rate.warning)
+        target_selling_price = _resolve_target_price(item, market_research, cost_cny)
+        profit = target_selling_price - cost_cny
         profit_margin = profit / target_selling_price if target_selling_price > 0 else 0
         price_gap = (
             market_research.avg_market_price - target_selling_price
             if market_research.avg_market_price is not None
             else profit
         )
-        raw_rows.append((item, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap))
+        raw_rows.append((item, cost_cny, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap))
 
     max_stock = max((row[0].stock or row[0].sku_count for row in raw_rows), default=0)
 
     scored: list[ScoredProduct] = []
-    for item, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap in raw_rows:
+    for item, cost_cny, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap in raw_rows:
         price_gap_score = market_research.price_gap_score
         inventory_units = item.stock or item.sku_count
         inventory_priority = inventory_units / max_stock if max_stock else 0
@@ -192,7 +205,13 @@ def score_products(
         scored.append(
             ScoredProduct(
                 product_name=item.product_name,
-                cost=item.cost,
+                cost=round(cost_cny, 2),
+                original_cost=item.cost,
+                cost_currency=item.cost_currency,
+                target_currency=item.target_currency,
+                cad_to_cny_rate=fx_rate.rate,
+                fx_source=fx_rate.source,
+                fx_warning=fx_rate.warning,
                 stock=inventory_units,
                 target_selling_price=target_selling_price,
                 profit=profit,
@@ -335,12 +354,18 @@ def _default_target_price(cost: float) -> float:
     return round(cost * 1.55, 2)
 
 
-def _resolve_target_price(item: InventoryItem, market_research: MarketResearchResult) -> float:
+def _resolve_target_price(item: InventoryItem, market_research: MarketResearchResult, cost_cny: float) -> float:
     if item.target_selling_price > 0:
         return item.target_selling_price
-    if market_research.avg_market_price and market_research.avg_market_price > item.cost:
+    if market_research.avg_market_price and market_research.avg_market_price > cost_cny:
         return round(market_research.avg_market_price, 2)
-    return _default_target_price(item.cost)
+    return _default_target_price(cost_cny)
+
+
+def _convert_cost_to_cny(cost: float, currency: str, cad_to_cny_rate: float) -> float:
+    if currency.upper() == "CAD":
+        return round(cost * cad_to_cny_rate, 2)
+    return round(cost, 2)
 
 
 def _competition_score(avg_market_price: float | None, target_selling_price: float) -> float:

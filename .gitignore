@@ -7,4 +7,5 @@ __pycache__/
 .vercel
 .cache/
 data/reports/
+data/fx_rate_cache.json
 outputs/

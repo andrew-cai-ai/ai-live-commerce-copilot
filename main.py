@@ -41,8 +41,8 @@ EXAMPLE_VIEWER_COMMENTS = """175 70kg穿啥
 真的假的
 值得买吗"""
 
-EXAMPLE_INVENTORY_PLACEHOLDER = """商品名, 成本, 库存, 目标售价
-真实商品标题, 供货价, 可售库存, 建议直播价"""
+EXAMPLE_INVENTORY_PLACEHOLDER = """商品名, CAD成本, 库存, 目标售价CNY
+真实商品标题, CAD供货价, 可售库存, 建议直播价"""
 
 EXAMPLE_TAOBAO_JSON = """{
   "data": {
@@ -398,7 +398,7 @@ def _render_form(
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
         <textarea id="inventory_text" name="inventory_text" spellcheck="false" placeholder="{html.escape(EXAMPLE_INVENTORY_PLACEHOLDER)}">{html.escape(inventory_text)}</textarea>
-      <div class="hint">可选格式：商品名, 成本, 库存, 目标售价。Excel 或淘宝 JSON 优先；手填库存适合临时补充。</div>
+      <div class="hint">可选格式：商品名, CAD成本, 库存, 目标售价CNY。Excel 或淘宝 JSON 优先；手填库存适合临时补充。</div>
       <div>
         <label for="inventory_excel">Excel upload（可选）</label>
         <input id="inventory_excel" name="inventory_excel" type="file" accept=".xlsx,.csv">

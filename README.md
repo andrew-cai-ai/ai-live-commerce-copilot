@@ -26,6 +26,8 @@ SERPAPI_API_KEY=
 SERPAPI_CACHE_TTL_SECONDS=86400
 APP_PASSWORD=
 APP_SECRET=
+FX_API_KEY=
+FX_API_URL=
 ```
 
 `.env` is ignored by git. Keep real API keys in `.env`, never in source code.
@@ -48,7 +50,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 Then share `http://YOUR_LAN_IP:8001`. See `DEPLOYMENT.md` for password protection and cloud deployment notes.
 
-For external users, deploy to Render. This repo includes `render.yaml`; push to GitHub, create a Render Blueprint/Web Service, then set `OPENAI_API_KEY`, `SERPAPI_API_KEY`, `APP_PASSWORD`, and `APP_SECRET` in Render's environment settings.
+For external users, deploy to Render. This repo includes `render.yaml`; push to GitHub, create a Render Blueprint/Web Service, then set `OPENAI_API_KEY`, `SERPAPI_API_KEY`, `APP_PASSWORD`, `APP_SECRET`, `FX_API_KEY`, and `FX_API_URL` in Render's environment settings.
+
+## Currency
+
+Inventory cost is treated as CAD by default. Target selling price is treated as CNY. The app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 5.30 CNY` and shows a warning in the report.
 
 ## History, Export, and Cache
 

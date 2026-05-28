@@ -237,6 +237,9 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
                 "rank": product.rank,
                 "score": round(product.score, 4),
                 "cost": product.cost,
+                "original_cost": product.original_cost,
+                "cost_currency": product.cost_currency,
+                "cad_to_cny_rate": product.cad_to_cny_rate,
                 "stock": product.stock,
                 "target_selling_price": product.target_selling_price,
                 "profit_margin": round(product.profit_margin, 4),
@@ -562,7 +565,10 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
       </div>
       <div class="metrics">
         {_metric("成本", _money(product.cost, "CNY"))}
+        {_metric("原始成本", _source_currency_label(product.original_cost, product.cost_currency))}
+        {_metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY")}
         {_metric("目标售价", _money(product.target_selling_price, "CNY"))}
+        {_metric("毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("市场价差", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
         {_metric("库存", str(product.stock))}
@@ -578,6 +584,7 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         {_metric("竞争分", f"{product.competition_score:.2f}")}
         {_metric("GMV潜力", product.gmv_level)}
       </div>
+      {_fx_warning(product)}
       <div class="evidence"><b>Real data vs AI inferred data</b>{_real_vs_inferred(product)}</div>
       <div class="section">
         <h3>Why AI ranked this product</h3>
@@ -616,6 +623,12 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
 
 def _metric(label: str, value: str, class_name: str = "") -> str:
     return f'<div class="metric"><span>{html.escape(label)}</span><b class="{class_name}">{html.escape(value)}</b></div>'
+
+
+def _fx_warning(product: ScoredProduct) -> str:
+    if not product.fx_warning:
+        return ""
+    return f'<div class="warning"><b>汇率提示</b><p>{html.escape(product.fx_warning)}</p></div>'
 
 
 def _collapsed_section(title: str, body: str) -> str:
@@ -2274,6 +2287,17 @@ def _money(value: float | None, currency: str = "CNY") -> str:
         return "N/A"
     symbol = {"USD": "$", "CAD": "C$", "CNY": "¥"}.get(currency.upper(), f"{currency.upper()} ")
     return f"{symbol}{value:,.2f}"
+
+
+def _source_currency_label(value: float | None, currency: str) -> str:
+    if value is None:
+        return "N/A"
+    currency = currency.upper()
+    if currency == "CAD":
+        return f"${value:,.2f} CAD"
+    if currency == "USD":
+        return f"${value:,.2f} USD"
+    return _money(value, currency)
 
 
 def _market_price_label(value: float | None, currency: str = "CNY") -> str:
