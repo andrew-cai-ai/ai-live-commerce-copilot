@@ -188,7 +188,7 @@ class LiveDataConnector:
         )
         return LiveMetricSnapshot(
             timestamp=time.time(),
-            online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv") or _pick(total_stats, "uv")),
+            online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv")),
             uv=_to_number(_pick(total_stats, "uv")),
             pv=_to_number(_pick(total_stats, "pv")),
             stay_time_pu=_to_number(_pick(total_stats, "stay_time_pu", "stayTimePu", "watch_duration") or _pick(data_region, "look_time_5min_avg_d_live")),
@@ -201,10 +201,10 @@ class LiveDataConnector:
             refund_amt=_to_number(_pick(total_stats, "refund_amt", "refundAmt")),
             comment_uv=_to_number(_pick(total_stats, "comment_uv", "commentUv")),
             atn_uv=_to_number(_pick(total_stats, "atn_uv", "atnUv")),
-            look_uv_td_d_live=_to_number(_pick(data_region, "look_uv_td_d_live")),
+            look_uv_td_d_live=_to_number(_pick(data_region, "look_uv_td_d_live") or _pick(data, "look_uv_td_d_live")),
             look_time_td_avg_d_live=_to_number(_pick(data_region, "look_time_td_avg_d_live")),
             pay_amt_td_d_live=_to_number(_pick(data_region, "pay_amt_td_d_live")),
-            look_uv_5min_d_live=_to_number(_pick(data_region, "look_uv_5min_d_live")),
+            look_uv_5min_d_live=_to_number(_pick(data_region, "look_uv_5min_d_live") or _pick(data, "look_uv_5min_d_live")),
             look_time_5min_avg_d_live=_to_number(_pick(data_region, "look_time_5min_avg_d_live")),
             pay_amt_5min_d_live=_to_number(_pick(data_region, "pay_amt_5min_d_live")),
             pay_amt_5min_d_shop=_to_number(_pick(data_region, "pay_amt_5min_d_shop")),
@@ -460,7 +460,9 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
 
 
 _ENCODED_METRIC_TERMS: dict[str, tuple[str, ...]] = {
-    "online_uv": ("online_uv", "onlineuv", "在线人数", "在线观众", "观看人数", "看播人数", "look_uv"),
+    "look_uv_td_d_live": ("look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"),
+    "online_uv": ("online_uv", "onlineuv", "当前在线", "当前在线人数", "实时在线", "在线人数", "在线观众"),
+    "look_uv_5min_d_live": ("look_uv_5min_d_live", "lookuv5mindlive", "近5分钟观看", "近五分钟观看", "5分钟观看", "最近5分钟观看", "look_uv_5min"),
     "heat_score": ("heat_score", "heatscore", "热度", "热力值"),
     "pay_amt": ("pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"),
     "pay_byr_rate": ("pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"),
@@ -724,6 +726,8 @@ def _current_live_score(snapshot: LiveMetricSnapshot) -> float:
 def _has_valid_live_metrics(snapshot: LiveMetricSnapshot) -> bool:
     return not (
         snapshot.online_uv <= 0
+        and snapshot.look_uv_td_d_live <= 0
+        and snapshot.look_uv_5min_d_live <= 0
         and snapshot.heat_score <= 0
         and snapshot.pay_amt <= 0
         and snapshot.pay_amt_5min_d_live <= 0

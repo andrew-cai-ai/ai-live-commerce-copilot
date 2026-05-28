@@ -825,6 +825,8 @@ def _render_live_mode_dashboard() -> str:
         </div>
         <div class="live-grid">
           <div class="live-metric"><span>Current viewers</span><b id="viewer-count">--</b></div>
+          <div class="live-metric"><span>Current concurrent online</span><b id="concurrent-online">--</b></div>
+          <div class="live-metric"><span>Recent 5min viewers</span><b id="recent-5min-viewers">--</b></div>
           <div class="live-metric"><span>CTR</span><b id="ctr">--</b></div>
           <div class="live-metric"><span>CVR</span><b id="cvr">--</b></div>
           <div class="live-metric"><span>Add-to-cart rate</span><b id="cart-rate">--</b></div>
@@ -1128,16 +1130,22 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
         const payload = raw.data && typeof raw.data === "object" ? raw.data : raw;
         const encodedMetrics = extractTaobaoDataListMetrics(payload);
+        const regionMetrics = Object.assign(
+          {},
+          payload.totalStats && typeof payload.totalStats === "object" ? payload.totalStats : {},
+          payload.dataRegion && typeof payload.dataRegion === "object" ? payload.dataRegion : {},
+          encodedMetrics
+        );
         if (payload.data && typeof payload.data === "object") {
           if (payload.data.data && typeof payload.data.data === "object") {
-            return Object.assign({}, payload.data.data, encodedMetrics);
+            return Object.assign({}, payload.data.data, regionMetrics);
           }
           if (payload.data.result && typeof payload.data.result === "object") {
-            return Object.assign({}, payload.data.result, encodedMetrics);
+            return Object.assign({}, payload.data.result, regionMetrics);
           }
-          return Object.assign({}, payload.data, encodedMetrics);
+          return Object.assign({}, payload.data, regionMetrics);
         }
-        return Object.assign({}, payload, encodedMetrics);
+        return Object.assign({}, payload, regionMetrics);
       }
 
       function normalizeTaobaoPayload(input) {
@@ -1153,7 +1161,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       const encodedMetricMap = [
-        { field: "online_uv", terms: ["online_uv", "onlineuv", "在线人数", "在线观众", "观看人数", "看播人数", "look_uv"] },
+        { field: "look_uv_td_d_live", terms: ["look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"] },
+        { field: "online_uv", terms: ["online_uv", "onlineuv", "当前在线", "当前在线人数", "实时在线", "在线人数", "在线观众"] },
+        { field: "look_uv_5min_d_live", terms: ["look_uv_5min_d_live", "lookuv5mindlive", "近5分钟观看", "近五分钟观看", "5分钟观看", "最近5分钟观看", "look_uv_5min"] },
         { field: "heat_score", terms: ["heat_score", "heatscore", "热度", "热力值"] },
         { field: "pay_amt", terms: ["pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"] },
         { field: "pay_byr_rate", terms: ["pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"] },
@@ -1273,7 +1283,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (!onlineUv || !heatScore || !payAmt || !sourceNode) {
           return;
         }
-        onlineUv.textContent = metrics ? Math.round(toNumber(metrics.viewer_count)).toLocaleString() : "--";
+        onlineUv.textContent = metrics ? Math.round(toNumber(metrics.online_uv)).toLocaleString() : "--";
         heatScore.textContent = metrics ? String(toNumber(metrics.heat_score_raw)) : "--";
         payAmt.textContent = metrics ? formatMoney(toNumber(metrics.pay_amt)) : "--";
         sourceNode.textContent = source || "--";
@@ -1330,6 +1340,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       function hasValidLiveMetrics(metrics) {
         return !!metrics && (
           metrics.viewer_count > 0
+          || metrics.online_uv > 0
+          || metrics.look_uv_td_d_live > 0
+          || metrics.look_uv_5min_d_live > 0
           || metrics.heat_score_raw > 0
           || metrics.pay_amt > 0
           || metrics.ipv_uv_rate > 0
@@ -1340,7 +1353,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function hasValidNormalizedPayload(payload) {
         return !!payload && (
-          toNumber(payload.online_uv) > 0
+          toNumber(payload.look_uv_td_d_live) > 0
+          || toNumber(payload.online_uv) > 0
+          || toNumber(payload.look_uv_5min_d_live) > 0
           || toNumber(payload.pay_amt) > 0
           || toNumber(payload.heat_score) > 0
         );
@@ -1422,6 +1437,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function buildMetricsFromAssistantData(data) {
         const onlineUv = toNumber(data.online_uv);
+        const totalViewers = toNumber(data.look_uv_td_d_live);
+        const recent5minViewers = toNumber(data.look_uv_5min_d_live);
         const pv = toNumber(data.pv);
         const uv = toNumber(data.uv);
         const ipvUvRate = normalizeRate(data.ipv_uv_rate);
@@ -1450,7 +1467,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           - refund * 0.10
         );
         return enrichMetrics({
-          viewer_count: onlineUv || uv,
+          viewer_count: totalViewers || uv,
+          online_uv: onlineUv,
+          look_uv_td_d_live: totalViewers,
+          look_uv_5min_d_live: recent5minViewers,
           pv: pv,
           uv: uv,
           ctr: ipvUvRate,
@@ -1719,6 +1739,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
         const metrics = {
           viewer_count: Math.round(randomBetween(180, 980)),
+          online_uv: Math.round(randomBetween(10, 90)),
+          look_uv_td_d_live: 0,
+          look_uv_5min_d_live: Math.round(randomBetween(1, 80)),
           pv: Math.round(randomBetween(2000, 18000)),
           uv: Math.round(randomBetween(500, 5000)),
           ctr: randomBetween(0.018, 0.085),
@@ -1767,8 +1790,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function metricsFromConnector(snapshot) {
         snapshot = snapshot || {};
+        const totalViewers = toNumber(snapshot.look_uv_td_d_live);
+        const concurrentOnline = toNumber(snapshot.online_uv);
+        const recent5minViewers = toNumber(snapshot.look_uv_5min_d_live);
         const metrics = {
-          viewer_count: toNumber(snapshot.online_uv),
+          viewer_count: totalViewers || toNumber(snapshot.uv),
+          online_uv: concurrentOnline,
+          look_uv_td_d_live: totalViewers,
+          look_uv_5min_d_live: recent5minViewers,
           pv: toNumber(snapshot.pv),
           uv: toNumber(snapshot.uv),
           ctr: normalizeRate(snapshot.item_click_rate),
@@ -1786,7 +1815,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           refund_amt: toNumber(snapshot.refund_amt),
           refund_amt_normalized: normalizeRefundAmount(snapshot.refund_amt, snapshot.pay_amt),
           atn_uv: toNumber(snapshot.atn_uv),
-          atn_uv_normalized: normalizeAudienceCount(snapshot.atn_uv, snapshot.online_uv || snapshot.uv),
+          atn_uv_normalized: normalizeAudienceCount(snapshot.atn_uv, totalViewers || snapshot.uv),
           item_name: snapshot.current_product || "当前商品",
           item_click_rate: normalizeRate(snapshot.item_click_rate),
           item_conversion_rate: normalizeRate(snapshot.item_conversion_rate),
@@ -1990,6 +2019,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
         );
         document.getElementById("viewer-count").textContent = Math.round(metrics.viewer_count).toLocaleString();
+        document.getElementById("concurrent-online").textContent = Math.round(metrics.online_uv || 0).toLocaleString();
+        document.getElementById("recent-5min-viewers").textContent = Math.round(metrics.look_uv_5min_d_live || 0).toLocaleString();
         document.getElementById("ctr").textContent = formatPercent(metrics.item_click_rate);
         document.getElementById("cvr").textContent = formatPercent(metrics.item_conversion_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.item_add_cart_rate);
@@ -2050,6 +2081,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             : "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
         );
         document.getElementById("viewer-count").textContent = metrics.viewer_count.toLocaleString();
+        document.getElementById("concurrent-online").textContent = Math.round(metrics.online_uv || 0).toLocaleString();
+        document.getElementById("recent-5min-viewers").textContent = Math.round(metrics.look_uv_5min_d_live || 0).toLocaleString();
         document.getElementById("ctr").textContent = formatPercent(metrics.ipv_uv_rate);
         document.getElementById("cvr").textContent = formatPercent(metrics.pay_byr_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.cart_rate);
