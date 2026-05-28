@@ -884,6 +884,15 @@ def _render_live_mode_dashboard() -> str:
           <b>Paste mtop.taobao.tblive.portal.live.user.assistant.data.get JSON</b>
           <textarea id="live-assistant-data-input" spellcheck="false" placeholder='{"data":{"online_uv":520,"pv":12000,"uv":2100,"stay_time_pu":68,"pay_byr_rate":0.025,"pay_buyer_cnt":18,"pay_item_qty":24,"pay_amt":12880,"heat_score":78,"ipv_uv_rate":0.12,"comment_uv":36,"refund_amt":0,"atn_uv":45,"item_name":"当前商品","item_click_rate":0.18,"item_conversion_rate":0.035,"item_add_cart_rate":0.08,"item_gmv":6800,"jiangJieEffect":82}}'></textarea>
         </div>
+        <div class="decision-card">
+          <span>Parsed live metrics</span>
+          <div class="metrics">
+            <div class="metric"><span>online_uv</span><b id="debug-online-uv">--</b></div>
+            <div class="metric"><span>heat_score</span><b id="debug-heat-score">--</b></div>
+            <div class="metric"><span>pay_amt</span><b id="debug-pay-amt">--</b></div>
+            <div class="metric"><span>source</span><b id="debug-live-source">--</b></div>
+          </div>
+        </div>
         <div class="live-input">
           <b>Manual fallback mode</b>
           <div class="manual-live-grid">
@@ -1135,12 +1144,27 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
       }
 
+      function updateParsedMetricsDebug(metrics, source) {
+        const onlineUv = document.getElementById("debug-online-uv");
+        const heatScore = document.getElementById("debug-heat-score");
+        const payAmt = document.getElementById("debug-pay-amt");
+        const sourceNode = document.getElementById("debug-live-source");
+        if (!onlineUv || !heatScore || !payAmt || !sourceNode) {
+          return;
+        }
+        onlineUv.textContent = metrics ? Math.round(toNumber(metrics.viewer_count)).toLocaleString() : "--";
+        heatScore.textContent = metrics ? String(toNumber(metrics.heat_score_raw)) : "--";
+        payAmt.textContent = metrics ? formatMoney(toNumber(metrics.pay_amt)) : "--";
+        sourceNode.textContent = source || "--";
+      }
+
       function updateLiveDirectorStateFromTextarea() {
         const payload = readAssistantPayload();
         if (payload && payload.parse_error) {
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
+          updateParsedMetricsDebug(null, "parse_error");
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + payload.error_message;
           return null;
         }
@@ -1148,14 +1172,19 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
+          updateParsedMetricsDebug(null, "--");
           return null;
         }
         const metrics = buildMetricsFromAssistantData(payload);
+        metrics.source = "pasted_payload";
         liveDirectorState.latestPayload = payload;
         liveDirectorState.latestMetrics = metrics;
         liveDirectorState.hasValidPastedPayload = hasValidLiveMetrics(metrics);
         if (liveDirectorState.hasValidPastedPayload) {
+          updateParsedMetricsDebug(metrics, "pasted_payload");
           renderLiveDecision(metrics);
+        } else {
+          updateParsedMetricsDebug(metrics, "pasted_payload_invalid");
         }
         return payload;
       }
@@ -1197,6 +1226,16 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           atn_uv: 0,
           manual_fallback: true
         };
+      }
+
+      function manualMetricsFromInputs() {
+        const payload = readManualLiveMetrics();
+        if (!payload) {
+          return null;
+        }
+        const metrics = buildMetricsFromAssistantData(payload);
+        metrics.source = "manual";
+        return metrics;
       }
 
       function currentInputPayload() {
@@ -1497,6 +1536,28 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       async function simulateLiveMetrics() {
+        const pastedPayload = updateLiveDirectorStateFromTextarea();
+        if (pastedPayload && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
+          updateParsedMetricsDebug(liveDirectorState.latestMetrics, "pasted_payload");
+          try {
+            const connectorDecision = await fetchLiveDecision();
+            if (connectorDecision.valid_live_metrics === false) {
+              renderLiveDecision(liveDirectorState.latestMetrics);
+            } else {
+              renderConnectorDecision(connectorDecision);
+            }
+          } catch (error) {
+            renderLiveDecision(liveDirectorState.latestMetrics);
+            document.getElementById("live-status").textContent = "Using pasted Taobao live payload · connector fallback ignored: " + error.message;
+          }
+          return;
+        }
+        const manualMetrics = manualMetricsFromInputs();
+        if (manualMetrics && hasValidLiveMetrics(manualMetrics)) {
+          updateParsedMetricsDebug(manualMetrics, "manual");
+          renderLiveDecision(manualMetrics);
+          return;
+        }
         try {
           const connectorDecision = await fetchLiveDecision();
           renderConnectorDecision(connectorDecision);
@@ -1549,6 +1610,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           0,
           1
         );
+        updateParsedMetricsDebug(metrics, "mock");
         renderLiveDecision(enrichMetrics(metrics));
       }
 
@@ -1738,6 +1800,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function renderConnectorDecision(data) {
+        if (data.valid_live_metrics === false && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
+          updateParsedMetricsDebug(liveDirectorState.latestMetrics, "pasted_payload");
+          renderLiveDecision(liveDirectorState.latestMetrics);
+          return;
+        }
         const metrics = metricsFromConnector(data.snapshot);
         const decisionName = normalizeDecisionName(data.current_action);
         const decision = {
@@ -1751,6 +1818,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const queue = buildRecommendedQueue(metrics, { decision: decisionName });
         const liveScore = data.current_live_score ?? metrics.current_product_score;
         const noValidMetrics = data.valid_live_metrics === false && !liveDirectorState.hasValidPastedPayload;
+        const debugSource = data.source === "page_payload"
+          ? (liveDirectorState.hasValidPastedPayload ? "pasted_payload" : "manual")
+          : data.source === "chrome_extension"
+          ? "connector_api"
+          : data.source === "real_api"
+          ? "connector_api"
+          : "mock";
+        updateParsedMetricsDebug(metrics, debugSource);
 
         document.getElementById("live-status").textContent = (
           noValidMetrics
@@ -1805,12 +1880,18 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const trends = buildTrendSummary(metrics);
         const decision = buildDecisionReasons(metrics, trends);
         const queue = buildRecommendedQueue(metrics, decision);
+        const liveStatusText = metrics.source === "pasted_payload"
+          ? "Using pasted Taobao live payload · updates every 5s"
+          : metrics.source === "real"
+          ? "Using real Taobao live assistant data · updates every 5s"
+          : metrics.source === "manual"
+          ? "Using manual fallback metrics · updates every 5s"
+          : "Mock livestream simulator · updates every 5s";
+        updateParsedMetricsDebug(metrics, metrics.source || "mock");
         document.getElementById("live-status").textContent = (
-          metrics.source === "real"
-            ? "Using real Taobao live assistant data · updates every 5s"
-            : metrics.source === "manual"
-            ? "Using manual fallback metrics · updates every 5s"
-            : "Mock livestream simulator · updates every 5s"
+          hasValidLiveMetrics(metrics)
+            ? liveStatusText
+            : "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
         );
         document.getElementById("viewer-count").textContent = metrics.viewer_count.toLocaleString();
         document.getElementById("ctr").textContent = formatPercent(metrics.ipv_uv_rate);
