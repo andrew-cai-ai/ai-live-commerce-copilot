@@ -115,6 +115,13 @@ def live_console(request: Request) -> str:
     return _render_live_console()
 
 
+@app.get("/live/prompter", response_class=HTMLResponse)
+def live_prompter(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_live_prompter()
+
+
 @app.get("/install", response_class=HTMLResponse)
 def install_guide(request: Request) -> str:
     if not is_authenticated(request):
@@ -562,7 +569,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/boss">老板总控看板</a> · <a href="/live">打开主播控制台</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/boss">老板总控看板</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">主播大字提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -710,7 +717,7 @@ def _render_live_console() -> str:
       <div><h1>主播实时控制台</h1><div class="small">只看未来 10-30 秒该做什么</div></div>
       <div>
         <span class="mode-toggle"><button id="mode-real" type="button" class="active">真实</button><button id="mode-demo" type="button">演示</button></span>
-        <span class="status" id="connection-status">等待插件数据...</span><a href="/" style="margin-left:12px;">返回选品</a>
+        <span class="status" id="connection-status">等待插件数据...</span><a href="/live/prompter" style="margin-left:12px;">大字提词器</a><a href="/" style="margin-left:12px;">返回选品</a>
       </div>
     </header>
     <section class="layout">
@@ -1054,6 +1061,260 @@ def _render_live_console() -> str:
 </html>"""
 
 
+def _render_live_prompter() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>主播大字提词器</title>
+  <style>
+    :root { color-scheme: dark; --bg: #070b0a; --panel: #101816; --ink: #f6faf8; --muted: #9fb0aa; --line: #24322f; --good: #34d399; --warn: #fbbf24; --danger: #fb7185; --accent: #5eead4; }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top left, #14231f, var(--bg) 42%); color: var(--ink); }
+    main { width: min(1500px, calc(100vw - 36px)); margin: 0 auto; padding: 20px 0 28px; }
+    header { display: flex; justify-content: space-between; gap: 14px; align-items: center; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 20px; color: var(--muted); font-weight: 850; }
+    a { color: var(--accent); text-decoration: none; font-weight: 900; }
+    button, input { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #0c1311; color: var(--ink); font: inherit; }
+    button { cursor: pointer; font-weight: 950; }
+    button.primary { background: var(--accent); color: #05201b; border-color: var(--accent); }
+    .topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; background: rgba(255,255,255,.04); color: var(--muted); font-weight: 850; }
+    .stage { min-height: calc(100vh - 190px); display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
+    .main-card { border: 1px solid var(--line); border-radius: 16px; background: rgba(16, 24, 22, .88); padding: clamp(20px, 4vw, 56px); display: grid; align-content: center; gap: 24px; box-shadow: 0 24px 80px rgba(0,0,0,.28); }
+    .label { display: block; color: var(--muted); font-size: clamp(14px, 1.3vw, 20px); font-weight: 950; text-transform: uppercase; letter-spacing: 0; }
+    .action { font-size: clamp(54px, 10vw, 148px); line-height: .98; font-weight: 1000; color: var(--good); overflow-wrap: anywhere; }
+    .action.warn { color: var(--warn); }
+    .action.danger { color: var(--danger); }
+    .sentence { font-size: clamp(34px, 5.5vw, 78px); line-height: 1.12; font-weight: 950; overflow-wrap: anywhere; }
+    .reason { color: var(--muted); font-size: clamp(18px, 2vw, 28px); line-height: 1.35; font-weight: 850; }
+    .side { display: grid; gap: 12px; align-content: start; }
+    .panel { border: 1px solid var(--line); border-radius: 14px; background: rgba(16, 24, 22, .82); padding: 16px; }
+    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: rgba(255,255,255,.035); min-height: 86px; }
+    .metric span { display: block; color: var(--muted); font-size: 13px; font-weight: 900; }
+    .metric b { display: block; font-size: 30px; margin-top: 6px; overflow-wrap: anywhere; }
+    .queue { display: grid; gap: 8px; }
+    .queue-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.035); }
+    .queue-row span { color: var(--muted); font-weight: 950; }
+    .queue-row b { overflow-wrap: anywhere; }
+    .tiny { color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; }
+    .status-line { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-weight: 850; margin-top: 10px; }
+    @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>主播大字提词器</h1>
+        <div class="tiny">开播时只看这一屏：当前动作、下一句话、是否该切品。</div>
+      </div>
+      <div class="topbar">
+        <span class="pill" id="source-pill">等待数据</span>
+        <a href="/live">主播控制台</a>
+        <a href="/boss">老板看板</a>
+      </div>
+    </header>
+    <section class="stage">
+      <section class="main-card">
+        <span class="label">Current action</span>
+        <div class="action" id="prompter-action">等待真实数据</div>
+        <span class="label">Next sentence</span>
+        <div class="sentence" id="prompter-sentence">打开淘宝直播中控页，确认插件正在捕获实时数据。</div>
+        <div class="reason" id="prompter-reason">没有真实指标时，这里不会给主播乱下指令。</div>
+      </section>
+      <aside class="side">
+        <section class="panel">
+          <span class="label">连接</span>
+          <div class="controls">
+            <input id="host-id-input" placeholder="default 或 liveId">
+            <button class="primary" id="connect-host" type="button">连接</button>
+          </div>
+          <div class="status-line"><span>Host</span><b id="host-id-label">default</b></div>
+          <div class="status-line"><span>更新</span><b id="last-updated">--</b></div>
+          <div class="status-line"><span>模式</span><b id="mode-label">真实</b></div>
+        </section>
+        <section class="panel">
+          <span class="label">直播指标</span>
+          <div class="metric-grid">
+            <div class="metric"><span>总观看</span><b id="viewer-count">--</b></div>
+            <div class="metric"><span>在线</span><b id="online-uv">--</b></div>
+            <div class="metric"><span>GMV</span><b id="pay-amt">--</b></div>
+            <div class="metric"><span>热度</span><b id="heat-score">--</b></div>
+            <div class="metric"><span>CTR</span><b id="ctr">--</b></div>
+            <div class="metric"><span>CVR</span><b id="cvr">--</b></div>
+          </div>
+        </section>
+        <section class="panel">
+          <span class="label">商品节奏</span>
+          <div class="metric" style="margin-top:10px;"><span>当前商品</span><b id="current-product">--</b></div>
+          <div class="metric" style="margin-top:10px;"><span>讲解时长</span><b id="product-timer">00:00</b></div>
+        </section>
+        <section class="panel">
+          <span class="label">推荐队列</span>
+          <div class="queue" id="queue">
+            <div class="queue-row"><span>Now</span><b>等待商品池</b></div>
+          </div>
+          <div class="tiny" style="margin-top:10px;">商品队列从主播控制台同步。没有商品池时，系统只做直播间级别判断。</div>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <script>
+    let currentProduct = "";
+    let productStartedAt = Date.now();
+    let demoTick = 0;
+    function hostId() { return (document.getElementById("host-id-input").value.trim() || localStorage.getItem("ai_live_host_id") || "default"); }
+    function setHostId(value) {
+      const next = value || "default";
+      localStorage.setItem("ai_live_host_id", next);
+      document.getElementById("host-id-input").value = next;
+      document.getElementById("host-id-label").textContent = next;
+    }
+    function productsFromStorage() {
+      return (localStorage.getItem("ai_live_products") || "").split("\\n").map((line, index) => {
+        const parts = line.trim().split("|").map((part) => part.trim());
+        return parts[0] ? { name: parts[0], raw: line, score: 1 - index * 0.01, inventory: 1, profit_margin: 0 } : null;
+      }).filter(Boolean).slice(0, 50);
+    }
+    function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
+    function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
+    function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    function normalizeAction(action) {
+      const text = String(action || "").toLowerCase();
+      if (text.includes("no valid") || text.includes("数据不完整")) return "等待数据";
+      if (text.includes("switch")) return "切换商品";
+      if (text.includes("push")) return "加速逼单";
+      if (text.includes("value") || text.includes("price")) return "解释价格";
+      if (text.includes("sizing")) return "讲尺码";
+      if (text.includes("authenticity")) return "展示正品细节";
+      if (text.includes("continue")) return "继续讲";
+      return action || "等待数据";
+    }
+    function actionTone(action) {
+      const text = String(action || "").toLowerCase();
+      if (text.includes("switch") || text.includes("no valid") || text.includes("等待")) return "danger";
+      if (text.includes("value") || text.includes("price") || text.includes("sizing") || text.includes("authenticity")) return "warn";
+      return "good";
+    }
+    function sentenceFor(action, fallback) {
+      const text = String(action || "").toLowerCase();
+      if (text.includes("no valid")) return "先别乱切品，等插件数据进来再判断。";
+      if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
+      if (text.includes("value") || text.includes("price")) return "别光看价格，平时通勤能穿，买回去不会吃灰。";
+      if (text.includes("sizing")) return "175/70 正常 M，里面加卫衣建议 L。";
+      if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
+      if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
+      return fallback || "哥几个看一下，这件再讲 30 秒，看数据能不能继续顶上去。";
+    }
+    async function autoPickFreshHost() {
+      try {
+        const response = await fetch("/api/live/sessions");
+        const data = await response.json();
+        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        const fresh = sessions.filter((item) => item.age_seconds === null || item.age_seconds <= 60);
+        if ((hostId() === "default" || !hostId()) && fresh.length === 1) setHostId(fresh[0].host_id);
+      } catch (_error) {}
+    }
+    async function refreshDecision() {
+      const mode = localStorage.getItem("ai_live_mode") || "real";
+      document.getElementById("mode-label").textContent = mode === "demo" ? "演示" : "真实";
+      if (mode === "demo") {
+        renderDecision(buildDemoDecision());
+        return;
+      }
+      const response = await fetch("/api/live/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host_id: hostId(), products: productsFromStorage(), payload: { host_id: hostId() } })
+      });
+      const data = await response.json();
+      if (!data.error) renderDecision(data);
+    }
+    function buildDemoDecision() {
+      demoTick += 1;
+      const products = productsFromStorage();
+      const product = (products[demoTick % Math.max(products.length, 1)] || {}).name || "演示商品";
+      const actions = ["continue product", "push harder", "explain value", "switch to sizing explanation", "show authenticity proof"];
+      const action = actions[demoTick % actions.length];
+      return {
+        source: "demo",
+        valid_live_metrics: true,
+        current_action: action,
+        next_action: sentenceFor(action, ""),
+        recommended_next_product: (products[(demoTick + 1) % Math.max(products.length, 1)] || {}).name || "下一件演示商品",
+        reason: ["演示数据", "用于培训主播", "每 5 秒刷新"],
+        snapshot: {
+          timestamp: Date.now() / 1000,
+          current_product: product,
+          total_live_viewers: 1200 + demoTick * 30,
+          online_uv: 80 + demoTick,
+          pay_amt: 8800 + demoTick * 260,
+          heat_score: 620 + demoTick * 7,
+          ipv_uv_rate: 0.08,
+          pay_byr_rate: 0.022
+        }
+      };
+    }
+    function renderDecision(data) {
+      const snapshot = data.snapshot || {};
+      const rawAction = data.current_action || "";
+      const action = normalizeAction(rawAction);
+      const actionNode = document.getElementById("prompter-action");
+      actionNode.textContent = action;
+      actionNode.classList.remove("warn", "danger");
+      const tone = actionTone(rawAction || action);
+      if (tone === "warn") actionNode.classList.add("warn");
+      if (tone === "danger") actionNode.classList.add("danger");
+      document.getElementById("prompter-sentence").textContent = sentenceFor(rawAction, data.next_action);
+      document.getElementById("prompter-reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "等待更多趋势数据。";
+      document.getElementById("source-pill").textContent = data.valid_live_metrics ? "实时数据已连接" : "等待有效直播数据";
+      if (data.source === "demo") document.getElementById("source-pill").textContent = "演示模式";
+      document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
+      document.getElementById("online-uv").textContent = fmtNumber(snapshot.online_uv);
+      document.getElementById("pay-amt").textContent = fmtMoney(snapshot.pay_amt || snapshot.live_pay_amt);
+      document.getElementById("heat-score").textContent = fmtNumber(snapshot.heat_score);
+      document.getElementById("ctr").textContent = fmtPercent(snapshot.ipv_uv_rate);
+      document.getElementById("cvr").textContent = fmtPercent(snapshot.pay_byr_rate);
+      document.getElementById("last-updated").textContent = snapshot.timestamp ? new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "--";
+      const product = snapshot.current_product || (productsFromStorage()[0] && productsFromStorage()[0].name) || "--";
+      updateProduct(product);
+      renderQueue(product, data.recommended_next_product, action);
+    }
+    function updateProduct(productName) {
+      if (productName !== currentProduct) {
+        currentProduct = productName;
+        productStartedAt = Date.now();
+      }
+      document.getElementById("current-product").textContent = productName;
+    }
+    function renderTimer() {
+      const elapsed = Math.max(0, Math.floor((Date.now() - productStartedAt) / 1000));
+      const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      const seconds = String(elapsed % 60).padStart(2, "0");
+      document.getElementById("product-timer").textContent = minutes + ":" + seconds;
+    }
+    function renderQueue(current, next, action) {
+      const node = document.getElementById("queue");
+      const rows = [["Now", current || "--"], ["Next", next || "等待推荐"], ["Action", action || "--"]];
+      node.innerHTML = rows.map((row) => '<div class="queue-row"><span>' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
+    }
+    document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
+    setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    autoPickFreshHost().then(refreshDecision);
+    window.setInterval(refreshDecision, 5000);
+    window.setInterval(renderTimer, 1000);
+  </script>
+</body>
+</html>"""
+
+
 def _render_install_guide() -> str:
     return """<!doctype html>
 <html lang="zh-CN">
@@ -1085,7 +1346,7 @@ def _render_install_guide() -> str:
       <h1>Chrome 插件安装教程</h1>
       <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.1</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化。</p>
       <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
-      <p><a href="/live">打开主播控制台</a> · <a href="/">返回首页</a></p>
+      <p><a href="/live">打开主播控制台</a> · <a href="/live/prompter">打开主播大字提词器</a> · <a href="/">返回首页</a></p>
     </div>
     <div class="steps">
       <section class="step"><div><h2>下载并解压插件包</h2><p>点击上方下载，得到 zip 文件后先解压成文件夹。不要直接选择 zip。</p></div></section>
@@ -1094,6 +1355,7 @@ def _render_install_guide() -> str:
       <section class="step"><div><h2>打开淘宝直播中控</h2><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code> 的实时直播中控页面。</p></div></section>
       <section class="step"><div><h2>点击插件并检查 4 步状态</h2><p>插件弹窗里看到“捕获实时接口”和“发送到云端系统”完成后，回到主播控制台。</p></div></section>
       <section class="step"><div><h2>进入主播控制台</h2><p>打开 <a href="/live">/live</a>。如果只有一个活跃直播间，系统会自动连接；多人同时直播时，选择对应 Host / room ID。</p></div></section>
+      <section class="step"><div><h2>给主播打开大字提词器</h2><p>开播时建议把 <a href="/live/prompter">/live/prompter</a> 放在主播旁边屏幕，只显示“现在做什么”和“下一句怎么说”。</p></div></section>
     </div>
     <div class="note">如果没有正在直播，插件可能抓不到目标接口。这不是报错，可以先在 /live 使用“演示模式”培训主播。</div>
   </main>
