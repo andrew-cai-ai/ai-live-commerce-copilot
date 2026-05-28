@@ -313,7 +313,7 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
         "客户和主播都是中文用户，所有字段内容必须使用简体中文。"
         "请严格按结构化 JSON schema 返回。"
         "分数范围为 0 到 100。开场钩子约 15 秒，销售话术约 60 秒。"
-        "host_decision 只能是 Push hard、Mention briefly、Skip for today 三者之一。"
+        "host_decision 只能是 Push hard、Mention briefly、Skip 三者之一。"
         "排序逻辑：market_popularity 35%、sellability 30%、profit_margin 15%、inventory_priority 10%、competition_score 10%。"
         "必须优先考虑直播转化和主流需求，不要因为毛利高就过度推荐小众高客单产品。"
         "直播话术要像真实中文直播间，不要像广告文案，不要写 high-quality materials 这类泛词。"
@@ -362,7 +362,7 @@ def _report_json_schema() -> dict[str, Any]:
             "recommendation_score": {"type": "number"},
             "host_decision": {
                 "type": "string",
-                "enum": ["Push hard", "Mention briefly", "Skip for today"],
+                "enum": ["Push hard", "Mention briefly", "Skip"],
             },
             "comparison_with_similar_products": {"type": "array", "items": {"type": "string"}},
             "suggested_image_evidence": {"type": "array", "items": {"type": "string"}},
@@ -397,6 +397,7 @@ def _merge_report(product: ScoredProduct, reports: list[dict[str, Any]]) -> dict
     match = next((report for report in reports if report.get("product_name") == product.product_name), {})
     merged = fallback | {key: value for key, value in match.items() if value}
     merged["product_name"] = product.product_name
+    merged["host_decision"] = _fallback_host_decision(product.score)
     return merged
 
 
@@ -542,7 +543,7 @@ def _fallback_host_decision(score: float) -> str:
         return "Push hard"
     if score >= 0.5:
         return "Mention briefly"
-    return "Skip for today"
+    return "Skip"
 
 
 def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
@@ -1348,6 +1349,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function chooseAction(decision) {
+        if (decision === "No valid live metrics detected") {
+          return "action-topic";
+        }
         if (decision === "Switch product") {
           return "action-switch";
         }
@@ -1599,6 +1603,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
+        if (text.includes("no valid live metrics")) { return "No valid live metrics detected"; }
         if (text.includes("switch")) { return "Switch product"; }
         if (text.includes("value")) { return "Explain value/price"; }
         if (text.includes("authenticity")) { return "Show authenticity"; }
@@ -1621,10 +1626,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         };
         const trends = trendsFromConnector(data);
         const queue = buildRecommendedQueue(metrics, { decision: decisionName });
-        const liveScore = data.current_live_score || metrics.current_product_score;
+        const liveScore = data.current_live_score ?? metrics.current_product_score;
+        const noValidMetrics = data.valid_live_metrics === false;
 
         document.getElementById("live-status").textContent = (
-          data.source === "real_api"
+          noValidMetrics
+            ? "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
+            : data.source === "real_api"
             ? "Using real live metrics API · updates every 5s"
             : data.source === "page_payload"
             ? "Using pasted/manual live payload via connector · updates every 5s"
@@ -1903,7 +1911,7 @@ def _livestream_order(
     if not products:
         return {}
 
-    decision_priority = {"Push hard": 0, "Mention briefly": 1, "Skip for today": 2}
+    decision_priority = {"Push hard": 0, "Mention briefly": 1, "Skip": 2}
     ordered = sorted(
         products,
         key=lambda product: (
@@ -1916,12 +1924,12 @@ def _livestream_order(
     non_skip = [
         product
         for product in ordered
-        if report_by_name[product.product_name]["host_decision"] != "Skip for today"
+        if report_by_name[product.product_name]["host_decision"] != "Skip"
     ]
     skip = [
         product
         for product in ordered
-        if report_by_name[product.product_name]["host_decision"] == "Skip for today"
+        if report_by_name[product.product_name]["host_decision"] == "Skip"
     ]
     ordered = non_skip + skip
 
@@ -2070,7 +2078,7 @@ def _market_price_table(product: ScoredProduct) -> str:
           <td>{html.escape(price.platform)}</td>
           <td>{html.escape(price.source)}</td>
           <td>{html.escape(price.title)}</td>
-          <td>{html.escape(_money(price.price, price.currency))}</td>
+          <td>{html.escape(_market_price_label(price.price, price.currency))}</td>
           <td>{_link(price.url)}</td>
           <td>{price.confidence:.0%}</td>
         </tr>"""
@@ -2246,7 +2254,7 @@ def _decision_label(decision: str) -> str:
     labels = {
         "Push hard": "重点主推",
         "Mention briefly": "简短提及",
-        "Skip for today": "今日跳过",
+        "Skip": "今日跳过",
     }
     return labels.get(decision, "待判断")
 
@@ -2264,3 +2272,15 @@ def _money(value: float | None, currency: str = "CNY") -> str:
         return "N/A"
     symbol = {"USD": "$", "CAD": "C$", "CNY": "¥"}.get(currency.upper(), f"{currency.upper()} ")
     return f"{symbol}{value:,.2f}"
+
+
+def _market_price_label(value: float | None, currency: str = "CNY") -> str:
+    if value is None:
+        return "N/A"
+    currency = currency.upper()
+    original = _money(value, currency)
+    if currency == "USD":
+        return f"{original} USD (~{_money(value * 7.25, 'CNY')} CNY)"
+    if currency == "CAD":
+        return f"{original} CAD (~{_money(value * 5.30, 'CNY')} CNY)"
+    return f"{original} CNY"

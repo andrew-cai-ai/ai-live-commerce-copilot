@@ -68,6 +68,7 @@ class LiveMetricSnapshot:
 
 @dataclass
 class LiveDecision:
+    valid_live_metrics: bool
     current_live_score: float
     current_action: str
     next_action: str
@@ -224,6 +225,7 @@ class LiveDataConnector:
         current_action = "continue product"
         next_action = "继续讲当前商品，观察 30 秒趋势"
         current_live_score = _current_live_score(snapshot)
+        valid_live_metrics = _has_valid_live_metrics(snapshot)
         recent_winners = _recent_product_winners(snapshot.product_events)
         recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
         product_health = _product_health(snapshot, trend_30s, trend_60s)
@@ -232,7 +234,13 @@ class LiveDataConnector:
         livestream_mode = _livestream_mode(snapshot, trend_30s, current_live_score)
         learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
-        if snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
+        if not valid_live_metrics:
+            current_action = "No valid live metrics detected"
+            next_action = "Please paste valid Taobao mtop payload or configure live connector."
+            reason = ["online_uv=0", "heat_score=0", "pay_amt=0"]
+            confidence = 0.0
+            livestream_mode = "No valid live metrics"
+        elif snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
             current_action = "switch product"
             next_action = "切到下一件更容易成交的商品"
             reason = ["pay_amt_5min_d_live is 0", "online_uv is falling", "stay_time_pu is falling"]
@@ -282,6 +290,7 @@ class LiveDataConnector:
             reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
         return LiveDecision(
+            valid_live_metrics=valid_live_metrics,
             current_live_score=current_live_score,
             current_action=current_action,
             next_action=next_action,
@@ -386,6 +395,8 @@ def _has_major_trend(signature: Any) -> bool:
 
 def _timeline_event_type(decision: str, mode: str, signature: tuple[tuple[str, str, str], ...]) -> str:
     decision_text = decision.lower()
+    if "no valid live metrics" in decision_text:
+        return "danger"
     if "switch" in decision_text or mode == "Rescue mode":
         return "danger"
     if "push" in decision_text or any(field == "pay_amt_5min_d_live" and "up" in item for item in signature for field in item[:1]):
@@ -571,18 +582,36 @@ def _recent_product_winners(events: list[ProductEvent]) -> list[ProductEvent]:
 
 
 def _current_live_score(snapshot: LiveMetricSnapshot) -> float:
+    if not _has_valid_live_metrics(snapshot):
+        return 0.0
     heat = min(snapshot.heat_score / 800, 1.0)
     click = min(snapshot.ipv_uv_rate / 0.2, 1.0)
     conversion = min(snapshot.pay_byr_rate / 0.05, 1.0)
-    recent_pay = min(snapshot.pay_amt_5min_d_live / 20000, 1.0)
+    pay = min(snapshot.pay_amt / 50000, 1.0)
+    recent_pay = min((snapshot.pay_amt_5min_d_live or snapshot.item_gmv) / 20000, 1.0)
+    online = min(snapshot.online_uv / 1000, 1.0)
     stay = min(snapshot.stay_time_pu / 180, 1.0)
+    event_sales = min(sum(event.payBuyerCnt for event in snapshot.product_events[:5]) / 30, 1.0)
     return round(
-        heat * 0.30
-        + click * 0.20
+        pay * 0.22
         + conversion * 0.20
-        + recent_pay * 0.20
-        + stay * 0.10,
+        + click * 0.18
+        + heat * 0.16
+        + online * 0.10
+        + stay * 0.07
+        + recent_pay * 0.05
+        + event_sales * 0.02,
         4,
+    )
+
+
+def _has_valid_live_metrics(snapshot: LiveMetricSnapshot) -> bool:
+    return not (
+        snapshot.online_uv <= 0
+        and snapshot.heat_score <= 0
+        and snapshot.pay_amt <= 0
+        and snapshot.pay_amt_5min_d_live <= 0
+        and sum(event.payBuyerCnt for event in snapshot.product_events) <= 0
     )
 
 

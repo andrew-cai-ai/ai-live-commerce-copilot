@@ -14,6 +14,9 @@ from app.providers.douyin_provider import DouyinProvider
 from app.providers.google_shopping_provider import GoogleShoppingProvider
 from app.providers.xiaohongshu_provider import XiaohongshuProvider
 
+USD_TO_CNY = 7.25
+CAD_TO_CNY = 5.30
+
 
 class MarketResearchService:
     def __init__(
@@ -66,7 +69,7 @@ class MarketResearchService:
         social_signals = _merge_social_signals(social_signals)
         if not social_signals:
             warnings.append("No real social evidence found")
-        prices = [result.price for result in price_results if result.price > 0]
+        prices = [_price_to_cny(result) for result in price_results if result.price > 0]
         avg_market_price = mean(prices) if prices else None
         min_market_price = min(prices) if prices else None
         max_market_price = max(prices) if prices else None
@@ -131,6 +134,15 @@ def _calculate_price_gap_score(avg_market_price: float | None, target_selling_pr
         return 0.0
     gap_ratio = (avg_market_price - target_selling_price) / target_selling_price
     return round(max(0.0, min(1.0, 0.5 + gap_ratio)), 4)
+
+
+def _price_to_cny(result: PriceResult) -> float:
+    currency = result.currency.upper()
+    if currency == "USD":
+        return result.price * USD_TO_CNY
+    if currency == "CAD":
+        return result.price * CAD_TO_CNY
+    return result.price
 
 
 def _merge_social_signals(signals: list[SocialSignal]) -> list[SocialSignal]:
