@@ -41,8 +41,8 @@ EXAMPLE_VIEWER_COMMENTS = """175 70kg穿啥
 真的假的
 值得买吗"""
 
-EXAMPLE_INVENTORY_PLACEHOLDER = """商品名, CAD成本, 库存, 目标售价CNY
-真实商品标题, CAD供货价, 可售库存, 建议直播价"""
+EXAMPLE_INVENTORY_PLACEHOLDER = """商品名, 成本, 库存, 目标售价, 可选成本币种
+真实商品标题, 人民币成本, 可售库存, 建议直播价, CNY"""
 
 EXAMPLE_TAOBAO_JSON = """{
   "data": {
@@ -398,11 +398,11 @@ def _render_form(
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
         <textarea id="inventory_text" name="inventory_text" spellcheck="false" placeholder="{html.escape(EXAMPLE_INVENTORY_PLACEHOLDER)}">{html.escape(inventory_text)}</textarea>
-      <div class="hint">可选格式：商品名, CAD成本, 库存, 目标售价CNY。Excel 或淘宝 JSON 优先；手填库存适合临时补充。</div>
+      <div class="hint">可选格式：商品名, 成本, 库存, 目标售价, 可选成本币种。成本默认按 CNY；只有写 CAD/USD 才会换算。</div>
       <div>
         <label for="inventory_excel">Excel upload（可选）</label>
         <input id="inventory_excel" name="inventory_excel" type="file" accept=".xlsx,.csv">
-        <div class="hint">支持乱表头自动识别：商品名/品名/product/title/name，SKU/货号/编码/款号，颜色，成本/进价/供货价，库存/数量，售价/目标售价/建议售价，备注/卖点/活动。</div>
+        <div class="hint">支持乱表头自动识别：商品名/品名/product/title/name，SKU/货号/编码/款号，颜色，成本/进价/供货价，成本币种/cost_currency，库存/数量，售价/目标售价/建议售价，备注/卖点/活动。</div>
         <button type="submit" formaction="/preview_inventory">预览 Excel/CSV</button>
       </div>
       {preview_html}
@@ -487,6 +487,7 @@ def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> st
           <td>{html.escape(row.sku)}</td>
           <td>{html.escape(row.color)}</td>
           <td>{_display_optional(row.cost_price)}</td>
+          <td>{html.escape(row.cost_currency)}</td>
           <td>{_display_optional(row.inventory)}</td>
           <td>{_display_optional(row.target_price)}</td>
           <td>{html.escape(row.notes)}</td>
@@ -505,6 +506,7 @@ def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> st
               <th>sku</th>
               <th>color</th>
               <th>cost_price</th>
+              <th>cost_currency</th>
               <th>inventory</th>
               <th>target_price</th>
               <th>notes</th>

@@ -54,7 +54,7 @@ For external users, deploy to Render. This repo includes `render.yaml`; push to 
 
 ## Currency
 
-Inventory cost is treated as CAD by default. Target selling price is treated as CNY. The app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 4.90 CNY` and shows a warning in the report.
+Inventory cost is treated as CNY by default. Target selling price is treated as CNY. Add an optional `cost_currency` field with `CAD` or `USD` only when the inventory cost is not CNY. For explicit CAD costs, the app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 4.90 CNY` and shows a warning in the report.
 
 ## History, Export, and Cache
 

@@ -24,7 +24,7 @@ class InventoryItem:
     color: str = ""
     notes: str = ""
     source: str = "manual"
-    cost_currency: str = "CAD"
+    cost_currency: str = "CNY"
     target_currency: str = "CNY"
 
 
@@ -85,18 +85,20 @@ def parse_inventory(raw_text: str) -> list[InventoryItem]:
             continue
 
         row = _split_row(stripped)
-        if len(row) != 4:
+        if len(row) not in {4, 5}:
             raise ValueError(
-                f"第 {line_number} 行需要 4 个字段：商品名、成本、库存、目标售价。"
+                f"第 {line_number} 行需要 4 或 5 个字段：商品名、成本、库存、目标售价、可选成本币种。"
             )
 
-        name, cost, stock, target_price = row
+        name, cost, stock, target_price = row[:4]
+        cost_currency = row[4].strip().upper() if len(row) == 5 and row[4].strip() else "CNY"
         items.append(
             InventoryItem(
                 product_name=name.strip(),
                 cost=_parse_optional_money(cost, line_number, "cost") or 0.0,
                 stock=_parse_optional_stock(stock, line_number) or 0,
                 target_selling_price=_parse_optional_money(target_price, line_number, "target selling price") or 0.0,
+                cost_currency=_validate_cost_currency(cost_currency, line_number),
             )
         )
 
@@ -145,7 +147,8 @@ def score_products(
 ) -> list[ScoredProduct]:
     raw_rows = []
     market_research_service = MarketResearchService()
-    fx_rate = FxRateService().get_cad_to_cny_rate()
+    needs_fx = any(item.cost_currency.upper() in {"CAD", "USD"} for item in items)
+    fx_rate = FxRateService().get_cad_to_cny_rate() if needs_fx else None
     manual_overrides = manual_overrides or {}
 
     for item in items:
@@ -155,14 +158,14 @@ def score_products(
             raise ValueError(f"{item.product_name}: 库存不能为负数。")
 
         knowledge = get_product_knowledge(item.product_name)
-        cost_cny = _convert_cost_to_cny(item.cost, item.cost_currency, fx_rate.rate)
+        cost_cny = _convert_cost_to_cny(item.cost, item.cost_currency, fx_rate.rate if fx_rate else 1.0)
         target_selling_price = item.target_selling_price if item.target_selling_price > 0 else _default_target_price(cost_cny)
         market_research = market_research_service.research_product(
             product_name=item.product_name,
             target_selling_price=target_selling_price,
             manual_override=_find_manual_override(item.product_name, manual_overrides),
         )
-        if fx_rate.warning:
+        if fx_rate and fx_rate.warning:
             market_research.warnings.append(fx_rate.warning)
         target_selling_price = _resolve_target_price(item, market_research, cost_cny)
         profit = target_selling_price - cost_cny
@@ -210,10 +213,10 @@ def score_products(
                 original_cost=item.cost,
                 cost_currency=item.cost_currency,
                 target_currency=item.target_currency,
-                cad_to_cny_rate=fx_rate.rate,
-                fx_source=fx_rate.source,
-                fx_timestamp=fx_rate.timestamp,
-                fx_warning=fx_rate.warning,
+                cad_to_cny_rate=fx_rate.rate if fx_rate else 1.0,
+                fx_source=fx_rate.source if fx_rate else "not_used_cny_cost",
+                fx_timestamp=fx_rate.timestamp if fx_rate else 0.0,
+                fx_warning=fx_rate.warning if fx_rate else "",
                 stock=inventory_units,
                 target_selling_price=target_selling_price,
                 profit=profit,
@@ -365,9 +368,19 @@ def _resolve_target_price(item: InventoryItem, market_research: MarketResearchRe
 
 
 def _convert_cost_to_cny(cost: float, currency: str, cad_to_cny_rate: float) -> float:
-    if currency.upper() == "CAD":
+    currency = currency.upper()
+    if currency == "CAD":
         return round(cost * cad_to_cny_rate, 2)
+    if currency == "USD":
+        return round(cost * 7.25, 2)
     return round(cost, 2)
+
+
+def _validate_cost_currency(currency: str, line_number: int) -> str:
+    normalized = currency.upper()
+    if normalized not in {"CNY", "CAD", "USD"}:
+        raise ValueError(f"第 {line_number} 行成本币种只支持 CNY、CAD、USD。")
+    return normalized
 
 
 def _competition_score(avg_market_price: float | None, target_selling_price: float) -> float:

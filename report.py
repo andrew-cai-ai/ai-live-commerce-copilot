@@ -572,10 +572,7 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         </div>
       </div>
       <div class="metrics">
-        {_metric("成本", _money(product.cost, "CNY"))}
-        {_metric("原始成本", _source_currency_label(product.original_cost, product.cost_currency))}
-        {_metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY")}
-        {_metric("汇率来源", _fx_source_label(product))}
+        {_cost_metrics(product)}
         {_metric("目标售价", _money(product.target_selling_price, "CNY"))}
         {_metric("毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
@@ -634,8 +631,23 @@ def _metric(label: str, value: str, class_name: str = "") -> str:
     return f'<div class="metric"><span>{html.escape(label)}</span><b class="{class_name}">{html.escape(value)}</b></div>'
 
 
+def _cost_metrics(product: ScoredProduct) -> str:
+    rows = [_metric("成本", _money(product.cost, "CNY"))]
+    if product.cost_currency.upper() != "CNY":
+        rows.extend(
+            [
+                _metric("原始成本", _source_currency_label(product.original_cost, product.cost_currency)),
+                _metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY")
+                if product.cost_currency.upper() == "CAD"
+                else _metric("汇率", "1 USD = 7.25 CNY"),
+                _metric("汇率来源", _fx_source_label(product) if product.cost_currency.upper() == "CAD" else "固定 USD/CNY 估算"),
+            ]
+        )
+    return "".join(rows)
+
+
 def _fx_warning(product: ScoredProduct) -> str:
-    if not product.fx_warning:
+    if product.cost_currency.upper() == "CNY" or not product.fx_warning:
         return ""
     return f'<div class="warning"><b>汇率提示</b><p>{html.escape(product.fx_warning)}</p></div>'
 
@@ -956,6 +968,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         "想看黑色扣3"
       ];
       const liveMetricHistory = [];
+      const liveDirectorState = {
+        latestPayload: null,
+        latestMetrics: null,
+        hasValidPastedPayload: false
+      };
 
       function randomBetween(min, max) {
         return Math.random() * (max - min) + min;
@@ -1118,6 +1135,42 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
       }
 
+      function updateLiveDirectorStateFromTextarea() {
+        const payload = readAssistantPayload();
+        if (payload && payload.parse_error) {
+          liveDirectorState.latestPayload = null;
+          liveDirectorState.latestMetrics = null;
+          liveDirectorState.hasValidPastedPayload = false;
+          document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + payload.error_message;
+          return null;
+        }
+        if (!payload) {
+          liveDirectorState.latestPayload = null;
+          liveDirectorState.latestMetrics = null;
+          liveDirectorState.hasValidPastedPayload = false;
+          return null;
+        }
+        const metrics = buildMetricsFromAssistantData(payload);
+        liveDirectorState.latestPayload = payload;
+        liveDirectorState.latestMetrics = metrics;
+        liveDirectorState.hasValidPastedPayload = hasValidLiveMetrics(metrics);
+        if (liveDirectorState.hasValidPastedPayload) {
+          renderLiveDecision(metrics);
+        }
+        return payload;
+      }
+
+      function hasValidLiveMetrics(metrics) {
+        return !!metrics && (
+          metrics.viewer_count > 0
+          || metrics.heat_score_raw > 0
+          || metrics.pay_amt > 0
+          || metrics.ipv_uv_rate > 0
+          || metrics.pay_byr_rate > 0
+          || metrics.watch_time > 0
+        );
+      }
+
       function readManualLiveMetrics() {
         const fields = {
           online_uv: document.getElementById("manual-online-uv"),
@@ -1147,7 +1200,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function currentInputPayload() {
-        const realPayload = readAssistantPayload();
+        const realPayload = liveDirectorState.latestPayload || updateLiveDirectorStateFromTextarea();
         if (realPayload && realPayload.parse_error) {
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + realPayload.error_message;
           return null;
@@ -1241,6 +1294,26 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           ai_score: clamp(score, 0, 1),
           source: data.manual_fallback ? "manual" : "real"
         });
+      }
+
+      function bindLivePayloadInput() {
+        const input = document.getElementById("live-assistant-data-input");
+        if (!input) {
+          return;
+        }
+        let timeoutId = null;
+        const handleChange = function() {
+          window.clearTimeout(timeoutId);
+          timeoutId = window.setTimeout(function() {
+            const payload = updateLiveDirectorStateFromTextarea();
+            if (payload && liveDirectorState.hasValidPastedPayload) {
+              simulateLiveMetrics();
+            }
+          }, 150);
+        };
+        input.addEventListener("input", handleChange);
+        input.addEventListener("change", handleChange);
+        updateLiveDirectorStateFromTextarea();
       }
 
       function calculateDecision(metrics, trends) {
@@ -1677,7 +1750,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const trends = trendsFromConnector(data);
         const queue = buildRecommendedQueue(metrics, { decision: decisionName });
         const liveScore = data.current_live_score ?? metrics.current_product_score;
-        const noValidMetrics = data.valid_live_metrics === false;
+        const noValidMetrics = data.valid_live_metrics === false && !liveDirectorState.hasValidPastedPayload;
 
         document.getElementById("live-status").textContent = (
           noValidMetrics
@@ -1948,6 +2021,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }).join("");
       }
 
+      bindLivePayloadInput();
       simulateLiveMetrics();
       updateLiveCommentAssistant();
       window.setInterval(simulateLiveMetrics, 5000);

@@ -17,6 +17,7 @@ class SmartInventoryRow:
     sku: str = ""
     color: str = ""
     cost_price: float | None = None
+    cost_currency: str = "CNY"
     inventory: int | None = None
     target_price: float | None = None
     notes: str = ""
@@ -77,6 +78,7 @@ def parse_smart_inventory_file(file_bytes: bytes, filename: str = "") -> list[Sm
                 sku=_cell_from_mapping(raw_row, mapping, "sku"),
                 color=_cell_from_mapping(raw_row, mapping, "color"),
                 cost_price=_optional_float_text(_cell_from_mapping(raw_row, mapping, "cost_price")),
+                cost_currency=_normalize_currency(_cell_from_mapping(raw_row, mapping, "cost_currency")),
                 inventory=_optional_int_text(_cell_from_mapping(raw_row, mapping, "inventory")),
                 target_price=_optional_float_text(_cell_from_mapping(raw_row, mapping, "target_price")),
                 notes=_cell_from_mapping(raw_row, mapping, "notes"),
@@ -97,6 +99,7 @@ def smart_rows_to_inventory_items(rows: list[SmartInventoryRow]) -> list[Invento
             color=row.color,
             notes=row.notes,
             source="excel",
+            cost_currency=row.cost_currency,
         )
         for row in rows
         if row.product_name.strip()
@@ -104,13 +107,13 @@ def smart_rows_to_inventory_items(rows: list[SmartInventoryRow]) -> list[Invento
 
 
 def smart_rows_to_inventory_text(rows: list[SmartInventoryRow]) -> str:
-    lines = ["product_name,cost_price,inventory,target_selling_price"]
+    lines = ["product_name,cost_price,inventory,target_selling_price,cost_currency"]
     for row in rows:
         name = _csv_safe(row.product_name)
         cost = "" if row.cost_price is None else row.cost_price
         inventory = "" if row.inventory is None else row.inventory
         target = "" if row.target_price is None else row.target_price
-        lines.append(f"{name},{cost},{inventory},{target}")
+        lines.append(f"{name},{cost},{inventory},{target},{row.cost_currency}")
     return "\n".join(lines)
 
 
@@ -149,6 +152,7 @@ def parse_taobao_inventory_json(raw_json: str) -> list[InventoryItem]:
             category=product.cat_name,
             status=product.target_product_status,
             source="taobao_json",
+            cost_currency="CNY",
         )
         for product in products
     ]
@@ -166,6 +170,7 @@ FIELD_KEYWORDS = {
     "product_name": ["商品名", "品名", "product", "title", "name", "款名", "名称"],
     "sku": ["sku", "货号", "编码", "款号", "商品编码", "货品编号"],
     "color": ["颜色", "color", "colour", "配色"],
+    "cost_currency": ["成本币种", "币种", "currency", "cost_currency", "cost currency"],
     "cost_price": ["成本", "进价", "供货价", "cost", "采购价", "专属价"],
     "inventory": ["库存", "数量", "stock", "inventory", "可售", "件数"],
     "target_price": ["售价", "目标售价", "建议售价", "price", "直播价", "销售价", "定价"],
@@ -221,6 +226,11 @@ def _field_from_header(header: str) -> str | None:
         if any(_normalize_text(keyword) in normalized for keyword in keywords):
             return field
     return None
+
+
+def _normalize_currency(value: str) -> str:
+    normalized = value.strip().upper()
+    return normalized if normalized in {"CNY", "CAD", "USD"} else "CNY"
 
 
 def _header_score(header: str) -> int:
