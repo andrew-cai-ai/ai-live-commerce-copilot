@@ -3,8 +3,17 @@
   <head>
     <meta charset="utf-8">
     <style>
+      :root {
+        color-scheme: light;
+        --good: #047857;
+        --bad: #b91c1c;
+        --warn: #b45309;
+        --muted: #6b7280;
+        --line: #e5e7eb;
+        --soft: #f9fafb;
+      }
       body {
-        width: 280px;
+        width: 340px;
         margin: 0;
         padding: 14px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -12,33 +21,76 @@
       }
       h1 {
         font-size: 15px;
-        margin: 0 0 8px;
-      }
-      p {
-        font-size: 12px;
-        line-height: 1.45;
-        margin: 8px 0;
-        color: #4b5563;
+        margin: 0 0 10px;
       }
       .status {
+        display: grid;
+        gap: 8px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
         padding: 8px;
+        border: 1px solid var(--line);
         border-radius: 8px;
-        background: #ecfdf5;
-        color: #047857;
-        font-weight: 700;
+        background: var(--soft);
         font-size: 12px;
+      }
+      .row span {
+        color: var(--muted);
+      }
+      .row b {
+        text-align: right;
+      }
+      .good { color: var(--good); }
+      .bad { color: var(--bad); }
+      .warn { color: var(--warn); }
+      .hint {
+        margin-top: 10px;
+        padding: 9px;
+        border-radius: 8px;
+        background: #fffbeb;
+        color: #92400e;
+        font-size: 12px;
+        line-height: 1.45;
       }
       code {
         font-size: 11px;
-        color: #111827;
+        word-break: break-all;
+      }
+      button {
+        width: 100%;
+        margin-top: 10px;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px;
+        background: #111827;
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
       }
     </style>
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
-    <div class="status">监听中：liveplatform.taobao.com</div>
-    <p>打开已登录的淘宝直播后台页面后，本插件只捕获目标 mtop 接口的响应数据。</p>
-    <p>不会收集密码、cookie 或请求 headers。</p>
-    <p>本地上报地址：<br><code>POST http://localhost:8000/api/live-ingest</code></p>
+    <div class="status">
+      <div class="row"><span>Content script</span><b id="content-script">--</b></div>
+      <div class="row"><span>Page hook</span><b id="page-hook">--</b></div>
+      <div class="row"><span>Target API captured</span><b id="captured-api">--</b></div>
+      <div class="row"><span>Payload parsed</span><b id="parse-success">--</b></div>
+      <div class="row"><span>Sent to app</span><b id="send-success">--</b></div>
+      <div class="row"><span>Last captured</span><b id="last-captured">--</b></div>
+      <div class="row"><span>Last sent</span><b id="last-sent">--</b></div>
+      <div class="row"><span>Live ID</span><b id="live-id">--</b></div>
+      <div class="row"><span>Metrics</span><b id="metric-keys">--</b></div>
+      <div class="row"><span>Events</span><b id="event-count">--</b></div>
+      <div class="row"><span>Endpoint</span><b id="endpoint">--</b></div>
+      <div class="row"><span>Error</span><b id="error">--</b></div>
+    </div>
+    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页，并确保本地 app 正在 http://localhost:8000 运行。</div>
+    <button id="clear-status">清空状态</button>
+    <script src="popup.js"></script>
   </body>
 </html>

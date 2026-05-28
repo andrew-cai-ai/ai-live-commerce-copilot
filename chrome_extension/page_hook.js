@@ -270,13 +270,40 @@
 
   function captureResponse(url, responseText) {
     if (!String(url || "").includes(TARGET_API)) return;
+    window.postMessage({
+      type: "AI_LIVE_DIRECTOR_STATUS",
+      payload: {
+        capturedTargetApi: true,
+        lastCapturedAt: Date.now(),
+        lastCapturedUrl: String(url || "").slice(0, 180)
+      }
+    }, "*");
     const payload = parseJsonMaybe(responseText);
-    if (!payload) return;
+    if (!payload) {
+      window.postMessage({
+        type: "AI_LIVE_DIRECTOR_STATUS",
+        payload: {
+          lastParseSuccess: false,
+          lastError: "Target API captured, but response JSON/JSONP parse failed."
+        }
+      }, "*");
+      return;
+    }
     const current = normalizeMtopPayload(payload);
     const liveId = current.liveId || DEFAULT_LIVE_ID;
     const merged = mergePayload(metricsByLiveId.get(liveId) || {}, current);
     metricsByLiveId.set(liveId, merged);
     latestPayload = merged;
+    window.postMessage({
+      type: "AI_LIVE_DIRECTOR_STATUS",
+      payload: {
+        lastParseSuccess: true,
+        lastError: "",
+        liveId,
+        metricKeys: Object.keys(merged.metrics || {}),
+        eventCount: (merged.events || []).length
+      }
+    }, "*");
   }
 
   const originalFetch = window.fetch;
@@ -311,4 +338,13 @@
     lastSentAt = Date.now();
     window.postMessage({ type: "AI_LIVE_DIRECTOR_METRICS", payload: latestPayload }, "*");
   }, 1000);
+
+  window.postMessage({
+    type: "AI_LIVE_DIRECTOR_STATUS",
+    payload: {
+      pageHookInjected: true,
+      injectedAt: Date.now(),
+      targetApi: TARGET_API
+    }
+  }, "*");
 })();

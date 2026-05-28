@@ -64,6 +64,19 @@ Request body:
 
 The parser maps metrics only by exact `valueType`. For example, `uv` becomes total viewers, `online_uv` becomes current concurrent online users, and fields such as `look_uv_not_fans_rate` are ignored.
 
+## Debug panel
+
+Click the extension icon to see the connector status:
+
+- `Content script`: whether the extension injected into `liveplatform.taobao.com`
+- `Page hook`: whether response interception was installed
+- `Target API captured`: whether the target mtop API returned
+- `Payload parsed`: whether JSON/JSONP parsing succeeded
+- `Sent to app`: whether `POST /api/live-ingest` succeeded
+- `Last captured` / `Last sent`: timestamps for the latest successful steps
+
+If `Target API captured` is `no`, refresh or enter the Taobao live data console. If `Sent to app` is `no`, make sure the local FastAPI app is running on port `8000`.
+
 Product-level metrics are prepared in the backend schema. If Taobao does not return them yet, the Live Director will show:
 
 `Product-level metrics not connected yet.`
