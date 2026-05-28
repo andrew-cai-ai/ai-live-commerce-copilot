@@ -1,4 +1,5 @@
 const STATUS_KEY = "aiLiveDirectorStatus";
+let manualInjectOverride = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   setText("popup-js", "loaded", "good");
@@ -39,8 +40,13 @@ function render(status) {
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");
   setText("active-tab", status.activeTabHost || "--", status.activeTabMatches ? "good" : status.activeTabHost ? "warn" : "");
-  setText("manual-inject", status.manualInjectStatus || "--", status.manualInjectStatus === "success" ? "good" : status.manualInjectStatus === "failed" ? "bad" : "");
-  setText("error", status.lastError || "--", status.lastError ? "bad" : "");
+  const manualStatus = manualInjectOverride || {
+    status: status.manualInjectStatus || "--",
+    error: status.lastError || "",
+    className: status.manualInjectStatus === "success" ? "good" : status.manualInjectStatus === "failed" ? "bad" : ""
+  };
+  setText("manual-inject", manualStatus.status, manualStatus.className || "");
+  setText("error", manualStatus.error || status.lastError || "--", manualStatus.error || status.lastError ? "bad" : "");
 
   const hint = document.getElementById("hint");
   if (!status.contentScriptInjected) {
@@ -105,9 +111,9 @@ function inspectActiveTabDirect(errorMessage) {
 }
 
 function injectCurrentTab() {
+  manualInjectOverride = { status: "running", error: "", className: "warn" };
   setText("manual-inject", "running", "warn");
   setText("error", "--", "");
-  updateStatus({ manualInjectStatus: "running", lastError: "", clickedAt: Date.now() });
   injectCurrentTabDirect("");
 }
 
@@ -115,6 +121,11 @@ function injectCurrentTabDirect(reason) {
   let completed = false;
   window.setTimeout(() => {
     if (!completed) {
+      manualInjectOverride = {
+        status: "failed",
+        error: "chrome.tabs.query timed out. Reopen popup on the Taobao tab and try again.",
+        className: "bad"
+      };
       setText("manual-inject", "failed", "bad");
       setText("error", "chrome.tabs.query timed out. Reopen popup on the Taobao tab and try again.", "bad");
       updateStatus({
@@ -127,6 +138,7 @@ function injectCurrentTabDirect(reason) {
     completed = true;
     const tab = tabs && tabs[0] ? tabs[0] : null;
     if (!tab || !tab.id) {
+      manualInjectOverride = { status: "failed", error: "No active tab found.", className: "bad" };
       setText("manual-inject", "failed", "bad");
       setText("error", "No active tab found.", "bad");
       updateStatus({ manualInjectStatus: "failed", lastError: "No active tab found." }, refresh);
@@ -139,6 +151,7 @@ function injectCurrentTabDirect(reason) {
       host = "";
     }
     if (!activeTabMatches(tab.url || "")) {
+      manualInjectOverride = { status: "failed", error: "Current tab is not a Taobao/Tmall page.", className: "bad" };
       setText("active-tab", host || "--", "warn");
       setText("manual-inject", "failed", "bad");
       setText("error", "Current tab is not a Taobao/Tmall page.", "bad");
@@ -157,6 +170,7 @@ function injectCurrentTabDirect(reason) {
       files: ["content.js"]
     }, () => {
       if (chrome.runtime.lastError) {
+        manualInjectOverride = { status: "failed", error: chrome.runtime.lastError.message, className: "bad" };
         setText("active-tab", host || "--", "good");
         setText("manual-inject", "failed", "bad");
         setText("error", chrome.runtime.lastError.message, "bad");
@@ -171,6 +185,7 @@ function injectCurrentTabDirect(reason) {
         return;
       }
       setText("active-tab", host || "--", "good");
+      manualInjectOverride = { status: "success", error: reason || "", className: "good" };
       setText("manual-inject", "success", "good");
       setText("error", reason || "--", reason ? "warn" : "");
       updateStatus({
