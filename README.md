@@ -54,7 +54,9 @@ For external users, deploy to Render. This repo includes `render.yaml`; push to 
 
 ## Currency
 
-Inventory cost is treated as CNY by default. Target selling price is treated as CNY. Add an optional `cost_currency` field with `CAD` or `USD` only when the inventory cost is not CNY. For explicit CAD costs, the app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 4.90 CNY` and shows a warning in the report.
+Inventory cost is treated as CAD by default for this livestream workflow. Target selling price is treated as CNY. The app stores the original cost and currency, converts cost to CNY for ranking and profit, and shows both values in the report.
+
+Add an optional `cost_currency` field when a row uses another currency. Supported values are `CAD`, `USD`, and `CNY`. For CAD costs, the app fetches a live CAD to CNY rate from `FX_API_URL`; if that fails, it uses the cached rate, then falls back to `1 CAD = 4.90 CNY` and shows a warning in the report.
 
 ## History, Export, and Cache
 
@@ -194,6 +196,27 @@ Current realtime rules:
 Livestream order follows host decision priority: `Push hard` > `短讲` > `过款` > `不做主推` > `Skip`, so non-primary products stay late.
 
 The report includes a Post-Live Analysis section with total viewers, estimated GMV, best product, worst product, reasons, and next livestream suggestions.
+
+## Chrome Extension Connector
+
+The Chrome extension is in `chrome_extension/`. It captures Taobao live assistant responses from the user's logged-in browser session and sends normalized metrics to the app every 5 seconds.
+
+The cloud app exposes an authenticated download link:
+
+```text
+/download/chrome-extension
+```
+
+Use this instead of sending the extension through Gmail, which may block extension archives. After downloading:
+
+1. Unzip the file.
+2. Open `chrome://extensions`.
+3. Turn on Developer Mode.
+4. Click Load unpacked.
+5. Choose the unzipped extension folder.
+6. Open `liveplatform.taobao.com` during a real live session and click the extension.
+
+The connector tags each stream with `host_id/liveId`. The report page can auto-use the only active stream, or you can set the `Live room / host ID` field manually when multiple hosts are live.
 
 Final MVP polish:
 

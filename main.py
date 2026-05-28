@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import html
+import io
 import time
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
+import zipfile
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from report import generate_product_reports, render_report_page
 from app.services.audience_questions import answer_audience_questions
@@ -31,6 +34,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 live_data_connector = LiveDataConnector()
+BASE_DIR = Path(__file__).resolve().parent
+CHROME_EXTENSION_DIR = BASE_DIR / "chrome_extension"
 
 EXAMPLE_INVENTORY = ""
 
@@ -181,6 +186,27 @@ async def live_ingest(request: Request) -> dict[str, Any]:
         "snapshot_count": len(live_data_connector.snapshots),
         "last_updated": decision.snapshot.timestamp,
     }
+
+
+@app.get("/download/chrome-extension")
+async def download_chrome_extension(request: Request) -> Response:
+    if not is_authenticated(request):
+        return RedirectResponse("/", status_code=303)
+    buffer = io.BytesIO()
+    allowed_suffixes = {".html", ".js", ".json", ".md", ".css", ".png", ".svg"}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in CHROME_EXTENSION_DIR.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name.startswith(".") or path.suffix.lower() not in allowed_suffixes:
+                continue
+            archive.write(path, path.relative_to(CHROME_EXTENSION_DIR).as_posix())
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="ai-live-copilot-chrome-extension.zip"'},
+    )
 
 
 @app.post("/analyze", response_class=HTMLResponse)
@@ -423,7 +449,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/reports">查看历史报告 / 导出 HTML</a></p>
+    <p><a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -560,7 +586,7 @@ def _inject_report_history_banner(report_html: str, report_id: str) -> str:
     <section class="order-panel">
       <h2>报告已保存</h2>
       <p>报告 ID：{html.escape(report_id)}</p>
-      <p><a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a></p>
+      <p><a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     </section>"""
     return report_html.replace("<main>", f"<main>{banner}", 1)
 
