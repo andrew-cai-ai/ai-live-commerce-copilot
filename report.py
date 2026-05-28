@@ -887,6 +887,8 @@ def _render_live_mode_dashboard() -> str:
         <div class="decision-card">
           <span>Parsed live metrics</span>
           <div class="metrics">
+            <div class="metric"><span>Payload source</span><b id="debug-payload-source">--</b></div>
+            <div class="metric"><span>Payload parse success</span><b id="debug-parse-success">false</b></div>
             <div class="metric"><span>online_uv</span><b id="debug-online-uv">--</b></div>
             <div class="metric"><span>heat_score</span><b id="debug-heat-score">--</b></div>
             <div class="metric"><span>pay_amt</span><b id="debug-pay-amt">--</b></div>
@@ -1134,11 +1136,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function readAssistantPayload() {
         const input = document.getElementById("live-assistant-data-input");
-        if (!input || !input.value.trim()) {
+        const textareaValue = input ? input.value : "";
+        console.log("textarea value", textareaValue);
+        if (!input || !textareaValue.trim()) {
           return null;
         }
         try {
-          const raw = JSON.parse(input.value);
+          const raw = JSON.parse(textareaValue);
           const payload = normalizeAssistantPayload(raw);
           console.log("raw payload", raw);
           console.log("normalized payload", payload);
@@ -1163,13 +1167,26 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         sourceNode.textContent = source || "--";
       }
 
+      function updatePayloadDebug(source, parseSuccess, metrics) {
+        const sourceNode = document.getElementById("debug-payload-source");
+        const successNode = document.getElementById("debug-parse-success");
+        if (sourceNode) {
+          sourceNode.textContent = source || "--";
+        }
+        if (successNode) {
+          successNode.textContent = parseSuccess ? "true" : "false";
+        }
+        updateParsedMetricsDebug(metrics || null, source || "--");
+      }
+
       function updateLiveDirectorStateFromTextarea() {
+        console.log("trying pasted payload");
         const payload = readAssistantPayload();
         if (payload && payload.parse_error) {
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
-          updateParsedMetricsDebug(null, "parse_error");
+          updatePayloadDebug("pasted", false, null);
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + payload.error_message;
           return null;
         }
@@ -1177,7 +1194,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
-          updateParsedMetricsDebug(null, "--");
+          updatePayloadDebug("--", false, null);
           return null;
         }
         const payloadHasValidMetrics = hasValidNormalizedPayload(payload);
@@ -1187,10 +1204,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         liveDirectorState.latestMetrics = metrics;
         liveDirectorState.hasValidPastedPayload = payloadHasValidMetrics || hasValidLiveMetrics(metrics);
         if (liveDirectorState.hasValidPastedPayload) {
-          updateParsedMetricsDebug(metrics, "pasted_payload");
+          updatePayloadDebug("pasted", true, metrics);
           renderLiveDecision(metrics);
         } else {
-          updateParsedMetricsDebug(metrics, "pasted_payload_invalid");
+          updatePayloadDebug("pasted", false, metrics);
         }
         return payload;
       }
@@ -1258,7 +1275,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + realPayload.error_message;
           return null;
         }
-        const payload = realPayload || readManualLiveMetrics() || {};
+        if (!realPayload) {
+          return {};
+        }
+        const payload = realPayload;
         const commentsInput = document.getElementById("live-comments-input");
         if (commentsInput && commentsInput.value.trim()) {
           payload.viewer_comments = commentsInput.value;
@@ -1552,7 +1572,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       async function simulateLiveMetrics() {
         const pastedPayload = updateLiveDirectorStateFromTextarea();
         if (pastedPayload && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
-          updateParsedMetricsDebug(liveDirectorState.latestMetrics, "pasted_payload");
+          updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
           try {
             const connectorDecision = await fetchLiveDecision();
             if (connectorDecision.valid_live_metrics === false) {
@@ -1566,18 +1586,22 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           }
           return;
         }
-        const manualMetrics = manualMetricsFromInputs();
-        if (manualMetrics && hasValidLiveMetrics(manualMetrics)) {
-          updateParsedMetricsDebug(manualMetrics, "manual");
-          renderLiveDecision(manualMetrics);
-          return;
-        }
         try {
           const connectorDecision = await fetchLiveDecision();
-          renderConnectorDecision(connectorDecision);
-          return;
+          if (connectorDecision.valid_live_metrics !== false) {
+            renderConnectorDecision(connectorDecision);
+            return;
+          }
+          console.log("connector returned no valid live metrics; trying manual fallback");
         } catch (error) {
+          console.log("connector failed; trying manual fallback", error);
           document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
+        }
+        const manualMetrics = manualMetricsFromInputs();
+        if (manualMetrics && hasValidLiveMetrics(manualMetrics)) {
+          updatePayloadDebug("manual", true, manualMetrics);
+          renderLiveDecision(manualMetrics);
+          return;
         }
         const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
         const metrics = {
@@ -1624,7 +1648,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           0,
           1
         );
-        updateParsedMetricsDebug(metrics, "mock");
+        updatePayloadDebug("mock", true, metrics);
         renderLiveDecision(enrichMetrics(metrics));
       }
 
@@ -1815,7 +1839,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function renderConnectorDecision(data) {
         if (data.valid_live_metrics === false && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
-          updateParsedMetricsDebug(liveDirectorState.latestMetrics, "pasted_payload");
+          updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
           renderLiveDecision(liveDirectorState.latestMetrics);
           return;
         }
@@ -1833,13 +1857,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const liveScore = data.current_live_score ?? metrics.current_product_score;
         const noValidMetrics = data.valid_live_metrics === false && !liveDirectorState.hasValidPastedPayload;
         const debugSource = data.source === "page_payload"
-          ? (liveDirectorState.hasValidPastedPayload ? "pasted_payload" : "manual")
+          ? "pasted"
           : data.source === "chrome_extension"
-          ? "connector_api"
+          ? "connector"
           : data.source === "real_api"
-          ? "connector_api"
+          ? "connector"
           : "mock";
-        updateParsedMetricsDebug(metrics, debugSource);
+        updatePayloadDebug(debugSource, !noValidMetrics, metrics);
 
         document.getElementById("live-status").textContent = (
           noValidMetrics
@@ -1901,7 +1925,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           : metrics.source === "manual"
           ? "Using manual fallback metrics · updates every 5s"
           : "Mock livestream simulator · updates every 5s";
-        updateParsedMetricsDebug(metrics, metrics.source || "mock");
+        const debugSource = metrics.source === "pasted_payload" ? "pasted" : (metrics.source || "mock");
+        updatePayloadDebug(debugSource, hasValidLiveMetrics(metrics), metrics);
         document.getElementById("live-status").textContent = (
           hasValidLiveMetrics(metrics)
             ? liveStatusText

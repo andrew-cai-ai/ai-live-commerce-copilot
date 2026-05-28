@@ -142,6 +142,9 @@ class LiveDataConnector:
         payload: dict[str, Any] | None,
         warnings: list[str],
     ) -> tuple[dict[str, Any], str]:
+        if payload:
+            return _unwrap_payload(payload), "page_payload"
+
         if self.api_url:
             try:
                 headers = {}
@@ -152,9 +155,6 @@ class LiveDataConnector:
                 return _unwrap_payload(response.json()), "real_api"
             except Exception as exc:
                 warnings.append(f"Live metrics API failed, using fallback data: {exc}")
-
-        if payload:
-            return _unwrap_payload(payload), "page_payload"
 
         if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
             return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
