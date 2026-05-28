@@ -99,6 +99,7 @@ def smart_rows_to_inventory_items(rows: list[SmartInventoryRow]) -> list[Invento
             color=row.color,
             notes=row.notes,
             source="excel",
+            inventory_unknown=row.inventory is None,
             cost_currency=row.cost_currency,
         )
         for row in rows
@@ -221,7 +222,7 @@ def _map_headers(headers: list[str], sample_rows: list[tuple[Any, ...]]) -> dict
         if candidate is not None:
             mapping["product_name"] = candidate
             used_columns.add(candidate)
-    for field in ("cost_price", "target_price", "inventory"):
+    for field in ("cost_price", "target_price"):
         if field not in mapping:
             candidate = _guess_numeric_column(sample_rows, used_columns, integer_only=(field == "inventory"))
             if candidate is not None:
@@ -331,8 +332,18 @@ def _optional_float_text(value: str) -> float | None:
 
 
 def _optional_int_text(value: str) -> int | None:
+    if _looks_like_date(value):
+        return None
     parsed = _optional_float_text(value)
     return int(parsed) if parsed is not None else None
+
+
+def _looks_like_date(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(
+        re.search(r"\b(?:19|20)\d{2}[-/.年]\d{1,2}(?:[-/.月]\d{1,2})?", text)
+        or re.search(r"\b\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}\b", text)
+    )
 
 
 def _csv_safe(value: str) -> str:

@@ -242,7 +242,7 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
                 "cost_currency": product.cost_currency,
                 "target_currency": product.target_currency,
                 "cad_to_cny_rate": product.cad_to_cny_rate,
-                "stock": product.stock,
+                "stock": None if product.inventory_unknown else product.stock,
                 "target_selling_price": product.target_selling_price,
                 "profit_margin": round(product.profit_margin, 4),
                 "price_gap": round(product.price_gap, 2),
@@ -579,7 +579,7 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         {_metric("预估毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
-        {_metric("库存", str(product.stock))}
+        {_metric("库存", "unknown" if product.inventory_unknown else str(product.stock))}
         {_metric("平台热度", f"{product.popularity_score:.2f}")}
         {_metric("市场低价", _money_or_na(product.min_competitor_price, "CNY"))}
         {_metric("市场均价", _money_or_na(product.avg_competitor_price, "CNY"))}
@@ -958,7 +958,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         {
             "name": product.product_name,
             "score": round(product.score, 4),
-            "inventory": product.stock,
+            "inventory": 0 if product.inventory_unknown else product.stock,
             "profit_margin": round(product.profit_margin, 4),
             "rank": product.rank,
         }
@@ -1061,6 +1061,20 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function formatMoney(value) {
         return "¥" + Math.round(toNumber(value)).toLocaleString();
+      }
+
+      function metricMissing(metrics, key) {
+        return (metrics.missing_metrics || []).some(function(item) {
+          return item === key || String(item).endsWith("." + key);
+        });
+      }
+
+      function metricNumberText(metrics, key, value) {
+        return metricMissing(metrics, key) ? "missing" : Math.round(toNumber(value)).toLocaleString();
+      }
+
+      function metricPercentText(metrics, key, value) {
+        return metricMissing(metrics, key) ? "missing" : formatPercent(value);
       }
 
       function escapeHtml(text) {
@@ -1436,6 +1450,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function buildMetricsFromAssistantData(data) {
+        const missingMetrics = missingLiveMetrics(data);
         const onlineUv = toNumber(data.online_uv);
         const totalViewers = toNumber(data.look_uv_td_d_live);
         const recent5minViewers = toNumber(data.look_uv_5min_d_live);
@@ -1499,8 +1514,29 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           profit_margin: normalizeRate(data.profit_margin),
           authenticity_questions: toNumber(data.authenticity_questions || data.auth_questions),
           sizing_questions: toNumber(data.sizing_questions || data.size_questions),
+          missing_metrics: missingMetrics,
           ai_score: clamp(score, 0, 1),
           source: data.manual_fallback ? "manual" : "real"
+        });
+      }
+
+      function missingLiveMetrics(data) {
+        const required = [
+          "heat_score",
+          "ipv_uv_rate",
+          "pay_byr_rate",
+          "online_uv",
+          "uv",
+          "pv",
+          "comment_uv",
+          "pay_amt",
+          "look_uv_td_d_live",
+          "look_uv_5min_d_live",
+          "pay_amt_td_d_live",
+          "pay_amt_5min_d_live"
+        ];
+        return required.filter(function(key) {
+          return data[key] === undefined || data[key] === null || data[key] === "";
         });
       }
 
@@ -1525,6 +1561,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function calculateDecision(metrics, trends) {
+        if (metrics.missing_metrics && metrics.missing_metrics.length) {
+          return "数据不完整，等待 totalStats 或实时插件补齐。";
+        }
         const clickRate = metrics.item_click_rate || metrics.ipv_uv_rate || 0;
         const conversionRate = metrics.item_conversion_rate || metrics.pay_byr_rate || 0;
         const addCartRate = metrics.item_add_cart_rate || metrics.cart_rate || 0;
@@ -1630,6 +1669,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function buildDecisionReasons(metrics, trends) {
         const decision = calculateDecision(metrics, trends);
+        if (decision === "数据不完整，等待 totalStats 或实时插件补齐。") {
+          return {
+            decision: decision,
+            reasons: (metrics.missing_metrics || []).slice(0, 3).map(function(item) { return "missing: " + item; }),
+            sentence: "先别根据这组数据切品，等 totalStats 或实时插件把指标补齐。",
+            action: "等待完整数据"
+          };
+        }
         const reasons = metricContributions(metrics).map(function(row) {
           return row.label + ": " + (row.value >= 0 ? "+" : "") + (row.value * 100).toFixed(1);
         });
@@ -1681,6 +1728,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function chooseAction(decision) {
         if (decision === "No valid live metrics detected") {
+          return "action-topic";
+        }
+        if (decision === "数据不完整，等待 totalStats 或实时插件补齐。") {
           return "action-topic";
         }
         if (decision === "Switch product") {
@@ -1969,6 +2019,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
         if (text.includes("no valid live metrics")) { return "No valid live metrics detected"; }
+        if (text.includes("数据不完整")) { return "数据不完整，等待 totalStats 或实时插件补齐。"; }
         if (text.includes("switch")) { return "Switch product"; }
         if (text.includes("value")) { return "Explain value/price"; }
         if (text.includes("authenticity")) { return "Show authenticity"; }
@@ -1986,6 +2037,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return;
         }
         const metrics = metricsFromConnector(data.snapshot);
+        metrics.missing_metrics = data.missing_metrics || [];
         const decisionName = normalizeDecisionName(data.current_action);
         const decision = {
           decision: decisionName,
@@ -2018,11 +2070,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? "Using pasted/manual live payload via connector · updates every 5s"
             : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
         );
-        document.getElementById("viewer-count").textContent = Math.round(metrics.viewer_count).toLocaleString();
-        document.getElementById("concurrent-online").textContent = Math.round(metrics.online_uv || 0).toLocaleString();
-        document.getElementById("recent-5min-viewers").textContent = Math.round(metrics.look_uv_5min_d_live || 0).toLocaleString();
-        document.getElementById("ctr").textContent = formatPercent(metrics.item_click_rate);
-        document.getElementById("cvr").textContent = formatPercent(metrics.item_conversion_rate);
+        document.getElementById("viewer-count").textContent = metricNumberText(metrics, "look_uv_td_d_live", metrics.viewer_count);
+        document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
+        document.getElementById("recent-5min-viewers").textContent = metricNumberText(metrics, "look_uv_5min_d_live", metrics.look_uv_5min_d_live);
+        document.getElementById("ctr").textContent = metricPercentText(metrics, "ipv_uv_rate", metrics.item_click_rate);
+        document.getElementById("cvr").textContent = metricPercentText(metrics, "pay_byr_rate", metrics.item_conversion_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.item_add_cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(liveScore * 100);
@@ -2080,11 +2132,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? liveStatusText
             : "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
         );
-        document.getElementById("viewer-count").textContent = metrics.viewer_count.toLocaleString();
-        document.getElementById("concurrent-online").textContent = Math.round(metrics.online_uv || 0).toLocaleString();
-        document.getElementById("recent-5min-viewers").textContent = Math.round(metrics.look_uv_5min_d_live || 0).toLocaleString();
-        document.getElementById("ctr").textContent = formatPercent(metrics.ipv_uv_rate);
-        document.getElementById("cvr").textContent = formatPercent(metrics.pay_byr_rate);
+        document.getElementById("viewer-count").textContent = metricNumberText(metrics, "look_uv_td_d_live", metrics.viewer_count);
+        document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
+        document.getElementById("recent-5min-viewers").textContent = metricNumberText(metrics, "look_uv_5min_d_live", metrics.look_uv_5min_d_live);
+        document.getElementById("ctr").textContent = metricPercentText(metrics, "ipv_uv_rate", metrics.ipv_uv_rate);
+        document.getElementById("cvr").textContent = metricPercentText(metrics, "pay_byr_rate", metrics.pay_byr_rate);
         document.getElementById("cart-rate").textContent = formatPercent(metrics.cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);

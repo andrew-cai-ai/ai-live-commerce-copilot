@@ -88,6 +88,7 @@ class LiveDecision:
     trend_60s: dict[str, str]
     snapshot: LiveMetricSnapshot
     source: str
+    missing_metrics: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -109,11 +110,12 @@ class LiveDataConnector:
     ) -> LiveDecision:
         warnings: list[str] = []
         data, source = self._fetch_live_payload(payload, warnings)
+        missing_metrics = _missing_required_metrics(data)
         snapshot = self._build_snapshot(data, source)
         self._store_snapshot(snapshot)
         trend_30s = self._trend_for(snapshot, 30)
         trend_60s = self._trend_for(snapshot, 60)
-        decision = self._decide(snapshot, trend_30s, trend_60s, products or [])
+        decision = self._decide(snapshot, trend_30s, trend_60s, products or [], missing_metrics)
         self._record_action(decision)
         decision.warnings.extend(warnings)
         return decision
@@ -249,6 +251,7 @@ class LiveDataConnector:
         trend_30s: dict[str, str],
         trend_60s: dict[str, str],
         products: list[dict[str, Any]],
+        missing_metrics: list[str],
     ) -> LiveDecision:
         reason: list[str] = []
         confidence = 0.64
@@ -265,7 +268,13 @@ class LiveDataConnector:
         livestream_mode = _livestream_mode(snapshot, trend_30s, current_live_score)
         learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
-        if not valid_live_metrics:
+        if missing_metrics:
+            current_action = "数据不完整，等待 totalStats 或实时插件补齐。"
+            next_action = "先观察，不要根据缺失指标切品，等待 totalStats 或实时插件补齐。"
+            reason = [f"missing: {metric}" for metric in missing_metrics[:3]]
+            confidence = 0.0
+            livestream_mode = "Waiting for complete live metrics"
+        elif not valid_live_metrics:
             current_action = "No valid live metrics detected"
             next_action = "Please paste valid Taobao mtop payload or configure live connector."
             reason = ["online_uv=0", "heat_score=0", "pay_amt=0"]
@@ -344,6 +353,7 @@ class LiveDataConnector:
             trend_60s=trend_60s,
             snapshot=snapshot,
             source=snapshot.source,
+            missing_metrics=missing_metrics,
         )
 
 
@@ -457,6 +467,49 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
             return {**result, **encoded_metrics}
         return {**data, **encoded_metrics}
     return {**payload, **encoded_metrics}
+
+
+_TOTAL_STATS_REQUIRED = (
+    "heat_score",
+    "ipv_uv_rate",
+    "pay_byr_rate",
+    "online_uv",
+    "uv",
+    "pv",
+    "comment_uv",
+    "pay_amt",
+)
+
+_DATA_REGION_REQUIRED = (
+    "look_uv_td_d_live",
+    "look_uv_5min_d_live",
+    "pay_amt_td_d_live",
+    "pay_amt_5min_d_live",
+)
+
+
+def _missing_required_metrics(data: dict[str, Any]) -> list[str]:
+    total_stats = _find_dict(data, "totalStats")
+    if total_stats is None and any(_pick(data, field, _camelize(field)) is not None for field in _TOTAL_STATS_REQUIRED):
+        total_stats = data
+    data_region = _find_dict(data, "dataRegion")
+    if data_region is None and any(_pick(data, field) is not None for field in _DATA_REGION_REQUIRED):
+        data_region = data
+    missing: list[str] = []
+    if total_stats is None:
+        missing.extend(f"totalStats.{field}" for field in _TOTAL_STATS_REQUIRED)
+    else:
+        missing.extend(f"totalStats.{field}" for field in _TOTAL_STATS_REQUIRED if _pick(total_stats, field, _camelize(field)) is None)
+    if data_region is None:
+        missing.extend(f"dataRegion.{field}" for field in _DATA_REGION_REQUIRED)
+    else:
+        missing.extend(f"dataRegion.{field}" for field in _DATA_REGION_REQUIRED if _pick(data_region, field) is None)
+    return missing
+
+
+def _camelize(value: str) -> str:
+    head, *tail = value.split("_")
+    return head + "".join(part[:1].upper() + part[1:] for part in tail)
 
 
 _ENCODED_METRIC_TERMS: dict[str, tuple[str, ...]] = {

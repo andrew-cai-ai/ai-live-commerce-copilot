@@ -521,7 +521,7 @@ def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> st
 
 def _display_optional(value: object) -> str:
     if value is None or value == "":
-        return ""
+        return "unknown"
     return html.escape(str(value))
 
 

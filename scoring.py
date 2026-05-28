@@ -24,6 +24,7 @@ class InventoryItem:
     color: str = ""
     notes: str = ""
     source: str = "manual"
+    inventory_unknown: bool = False
     cost_currency: str = "CAD"
     target_currency: str = "CNY"
 
@@ -51,6 +52,7 @@ class ScoredProduct:
     fx_timestamp: float
     fx_warning: str
     stock: int
+    inventory_unknown: bool
     target_selling_price: float
     profit: float
     profit_margin: float
@@ -220,6 +222,7 @@ def score_products(
                 fx_timestamp=fx_rate.timestamp if fx_rate else 0.0,
                 fx_warning=fx_rate.warning if fx_rate else "",
                 stock=inventory_units,
+                inventory_unknown=item.inventory_unknown,
                 target_selling_price=target_selling_price,
                 profit=profit,
                 profit_margin=profit_margin,

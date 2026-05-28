@@ -3,6 +3,7 @@
   const SEND_INTERVAL_MS = 5000;
   let latestMetrics = null;
   let lastSentAt = 0;
+  const metricsByLiveId = new Map();
 
   function toNumber(value) {
     if (value === null || value === undefined || value === "") return 0;
@@ -36,6 +37,16 @@
       return payload.data;
     }
     return payload;
+  }
+
+  function liveIdFromPayload(payload, data) {
+    return String(
+      findValue(payload, "liveId")
+      || findValue(payload, "live_id")
+      || findValue(data, "liveId")
+      || findValue(data, "live_id")
+      || "default_live"
+    );
   }
 
   function parseJsonMaybe(text) {
@@ -85,26 +96,30 @@
 
   function normalizeMtopPayload(rawPayload) {
     const data = unwrapPayload(rawPayload);
-    const totalStats = findValue(data, "totalStats") || data;
-    const dataRegion = findValue(data, "dataRegion") || {};
+    const foundTotalStats = findValue(data, "totalStats");
+    const totalStats = foundTotalStats || {};
+    const foundDataRegion = findValue(data, "dataRegion");
+    const dataRegion = foundDataRegion || {};
+    const liveId = liveIdFromPayload(rawPayload, data);
     return {
       source: "chrome_extension",
       captured_api: TARGET_API,
       captured_at: Date.now(),
-      online_uv: toNumber(pick(totalStats, "online_uv", "onlineUv") || pick(totalStats, "uv")),
-      pv: toNumber(pick(totalStats, "pv")),
-      uv: toNumber(pick(totalStats, "uv")),
-      stay_time_pu: toNumber(pick(totalStats, "stay_time_pu", "stayTimePu") || pick(dataRegion, "look_time_5min_avg_d_live")),
-      pay_byr_rate: normalizeRate(pick(totalStats, "pay_byr_rate", "payByrRate")),
-      pay_buyer_cnt: toNumber(pick(totalStats, "pay_buyer_cnt", "payBuyerCnt")),
-      pay_item_qty: toNumber(pick(totalStats, "pay_item_qty", "payItemQty")),
-      pay_amt: toNumber(pick(totalStats, "pay_amt", "payAmt")),
-      heat_score: toNumber(pick(totalStats, "heat_score", "heatScore")),
-      ipv_uv_rate: normalizeRate(pick(totalStats, "ipv_uv_rate", "ipvUvRate")),
-      comment_uv: toNumber(pick(totalStats, "comment_uv", "commentUv")),
-      refund_amt: toNumber(pick(totalStats, "refund_amt", "refundAmt")),
-      atn_uv: toNumber(pick(totalStats, "atn_uv", "atnUv")),
-      dataRegion: {
+      liveId,
+      online_uv: foundTotalStats ? toNumber(pick(totalStats, "online_uv", "onlineUv")) : undefined,
+      pv: foundTotalStats ? toNumber(pick(totalStats, "pv")) : undefined,
+      uv: foundTotalStats ? toNumber(pick(totalStats, "uv")) : undefined,
+      stay_time_pu: foundTotalStats ? toNumber(pick(totalStats, "stay_time_pu", "stayTimePu")) : undefined,
+      pay_byr_rate: foundTotalStats ? normalizeRate(pick(totalStats, "pay_byr_rate", "payByrRate")) : undefined,
+      pay_buyer_cnt: foundTotalStats ? toNumber(pick(totalStats, "pay_buyer_cnt", "payBuyerCnt")) : undefined,
+      pay_item_qty: foundTotalStats ? toNumber(pick(totalStats, "pay_item_qty", "payItemQty")) : undefined,
+      pay_amt: foundTotalStats ? toNumber(pick(totalStats, "pay_amt", "payAmt")) : undefined,
+      heat_score: foundTotalStats ? toNumber(pick(totalStats, "heat_score", "heatScore")) : undefined,
+      ipv_uv_rate: foundTotalStats ? normalizeRate(pick(totalStats, "ipv_uv_rate", "ipvUvRate")) : undefined,
+      comment_uv: foundTotalStats ? toNumber(pick(totalStats, "comment_uv", "commentUv")) : undefined,
+      refund_amt: foundTotalStats ? toNumber(pick(totalStats, "refund_amt", "refundAmt")) : undefined,
+      atn_uv: foundTotalStats ? toNumber(pick(totalStats, "atn_uv", "atnUv")) : undefined,
+      dataRegion: foundDataRegion ? {
         look_uv_td_d_live: toNumber(pick(dataRegion, "look_uv_td_d_live")),
         look_time_td_avg_d_live: toNumber(pick(dataRegion, "look_time_td_avg_d_live")),
         pay_amt_td_d_live: toNumber(pick(dataRegion, "pay_amt_td_d_live")),
@@ -112,7 +127,7 @@
         look_time_5min_avg_d_live: toNumber(pick(dataRegion, "look_time_5min_avg_d_live")),
         pay_amt_5min_d_live: toNumber(pick(dataRegion, "pay_amt_5min_d_live")),
         pay_amt_5min_d_shop: toNumber(pick(dataRegion, "pay_amt_5min_d_shop"))
-      },
+      } : {},
       interactSecKill: parseProductEvents(findValue(data, "interactSecKill"))
     };
   }
@@ -121,7 +136,21 @@
     if (!String(url).includes(TARGET_API)) return;
     const payload = parseJsonMaybe(responseText);
     if (!payload) return;
-    latestMetrics = normalizeMtopPayload(payload);
+    const current = normalizeMtopPayload(payload);
+    const liveId = current.liveId || "default_live";
+    const previous = metricsByLiveId.get(liveId) || {};
+    const merged = mergeMetrics(previous, current);
+    metricsByLiveId.set(liveId, merged);
+    latestMetrics = merged;
+  }
+
+  function mergeMetrics(previous, current) {
+    const merged = { ...previous };
+    Object.entries(current).forEach(([key, value]) => {
+      if (value !== undefined) merged[key] = value;
+    });
+    merged.dataRegion = { ...(previous.dataRegion || {}), ...(current.dataRegion || {}) };
+    return merged;
   }
 
   const originalFetch = window.fetch;
