@@ -236,9 +236,11 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
                 "product_name": product.product_name,
                 "rank": product.rank,
                 "score": round(product.score, 4),
-                "cost": product.cost,
+                "cost_cny": product.cost,
+                "cost_price_original": product.cost_price_original,
                 "original_cost": product.original_cost,
                 "cost_currency": product.cost_currency,
+                "target_currency": product.target_currency,
                 "cad_to_cny_rate": product.cad_to_cny_rate,
                 "stock": product.stock,
                 "target_selling_price": product.target_selling_price,
@@ -573,8 +575,8 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
       </div>
       <div class="metrics">
         {_cost_metrics(product)}
-        {_metric("目标售价", _money(product.target_selling_price, "CNY"))}
-        {_metric("毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
+        {_metric("目标售价", _money(product.target_selling_price, product.target_currency))}
+        {_metric("预估毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
         {_metric("库存", str(product.stock))}
@@ -632,17 +634,18 @@ def _metric(label: str, value: str, class_name: str = "") -> str:
 
 
 def _cost_metrics(product: ScoredProduct) -> str:
-    rows = [_metric("成本", _money(product.cost, "CNY"))]
-    if product.cost_currency.upper() != "CNY":
+    original = _source_currency_label(product.cost_price_original, product.cost_currency)
+    converted = _money(product.cost, "CNY")
+    rows = [_metric("成本", f"{original} (≈ {converted})")]
+    if product.cost_currency.upper() == "CAD":
         rows.extend(
             [
-                _metric("原始成本", _source_currency_label(product.original_cost, product.cost_currency)),
-                _metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY")
-                if product.cost_currency.upper() == "CAD"
-                else _metric("汇率", "1 USD = 7.25 CNY"),
-                _metric("汇率来源", _fx_source_label(product) if product.cost_currency.upper() == "CAD" else "固定 USD/CNY 估算"),
+                _metric("汇率", f"1 CAD = {product.cad_to_cny_rate:.2f} CNY"),
+                _metric("汇率来源", _fx_source_label(product)),
             ]
         )
+    elif product.cost_currency.upper() == "USD":
+        rows.append(_metric("汇率", "1 USD = 7.25 CNY"))
     return "".join(rows)
 
 
@@ -2526,18 +2529,20 @@ def _metric_or_na(value: int | None) -> str:
 def _money(value: float | None, currency: str = "CNY") -> str:
     if value is None:
         return "N/A"
-    symbol = {"USD": "$", "CAD": "C$", "CNY": "¥"}.get(currency.upper(), f"{currency.upper()} ")
-    return f"{symbol}{value:,.2f}"
+    currency = currency.upper()
+    if currency == "CNY":
+        return f"¥{value:,.2f} CNY"
+    if currency == "CAD":
+        return f"${value:,.2f} CAD"
+    if currency == "USD":
+        return f"${value:,.2f} USD"
+    return f"{value:,.2f} {currency}"
 
 
 def _source_currency_label(value: float | None, currency: str) -> str:
     if value is None:
         return "N/A"
     currency = currency.upper()
-    if currency == "CAD":
-        return f"${value:,.2f} CAD"
-    if currency == "USD":
-        return f"${value:,.2f} USD"
     return _money(value, currency)
 
 
@@ -2547,7 +2552,7 @@ def _market_price_label(value: float | None, currency: str = "CNY") -> str:
     currency = currency.upper()
     original = _money(value, currency)
     if currency == "USD":
-        return f"{original} USD (~{_money(value * 7.25, 'CNY')} CNY)"
+        return f"{original} (≈ {_money(value * 7.25, 'CNY')})"
     if currency == "CAD":
-        return f"{original} CAD (~{_money(value * 4.90, 'CNY')} CNY)"
-    return f"{original} CNY"
+        return f"{original} (≈ {_money(value * 4.90, 'CNY')})"
+    return original

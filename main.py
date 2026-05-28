@@ -42,7 +42,7 @@ EXAMPLE_VIEWER_COMMENTS = """175 70kg穿啥
 值得买吗"""
 
 EXAMPLE_INVENTORY_PLACEHOLDER = """商品名, 成本, 库存, 目标售价, 可选成本币种
-真实商品标题, 人民币成本, 可售库存, 建议直播价, CNY"""
+真实商品标题, CAD成本, 可售库存, CNY建议直播价, CAD"""
 
 EXAMPLE_TAOBAO_JSON = """{
   "data": {
@@ -398,7 +398,7 @@ def _render_form(
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
         <textarea id="inventory_text" name="inventory_text" spellcheck="false" placeholder="{html.escape(EXAMPLE_INVENTORY_PLACEHOLDER)}">{html.escape(inventory_text)}</textarea>
-      <div class="hint">可选格式：商品名, 成本, 库存, 目标售价, 可选成本币种。成本默认按 CNY；只有写 CAD/USD 才会换算。</div>
+      <div class="hint">可选格式：商品名, 成本, 库存, 目标售价, 可选成本币种。成本默认按 CAD；目标售价默认按 CNY。支持 CNY/CAD/USD，系统会统一折算到 CNY 参与利润和排序。</div>
       <div>
         <label for="inventory_excel">Excel upload（可选）</label>
         <input id="inventory_excel" name="inventory_excel" type="file" accept=".xlsx,.csv">

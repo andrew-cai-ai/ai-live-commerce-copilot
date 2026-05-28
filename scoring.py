@@ -24,7 +24,7 @@ class InventoryItem:
     color: str = ""
     notes: str = ""
     source: str = "manual"
-    cost_currency: str = "CNY"
+    cost_currency: str = "CAD"
     target_currency: str = "CNY"
 
 
@@ -42,6 +42,7 @@ class SellabilityScore:
 class ScoredProduct:
     product_name: str
     cost: float
+    cost_price_original: float
     original_cost: float
     cost_currency: str
     target_currency: str
@@ -91,7 +92,7 @@ def parse_inventory(raw_text: str) -> list[InventoryItem]:
             )
 
         name, cost, stock, target_price = row[:4]
-        cost_currency = row[4].strip().upper() if len(row) == 5 and row[4].strip() else "CNY"
+        cost_currency = row[4].strip().upper() if len(row) == 5 and row[4].strip() else "CAD"
         items.append(
             InventoryItem(
                 product_name=name.strip(),
@@ -147,8 +148,8 @@ def score_products(
 ) -> list[ScoredProduct]:
     raw_rows = []
     market_research_service = MarketResearchService()
-    needs_fx = any(item.cost_currency.upper() in {"CAD", "USD"} for item in items)
-    fx_rate = FxRateService().get_cad_to_cny_rate() if needs_fx else None
+    needs_cad_fx = any(item.cost_currency.upper() == "CAD" for item in items)
+    fx_rate = FxRateService().get_cad_to_cny_rate() if needs_cad_fx else None
     manual_overrides = manual_overrides or {}
 
     for item in items:
@@ -210,11 +211,12 @@ def score_products(
             ScoredProduct(
                 product_name=item.product_name,
                 cost=round(cost_cny, 2),
+                cost_price_original=item.cost,
                 original_cost=item.cost,
                 cost_currency=item.cost_currency,
                 target_currency=item.target_currency,
                 cad_to_cny_rate=fx_rate.rate if fx_rate else 1.0,
-                fx_source=fx_rate.source if fx_rate else "not_used_cny_cost",
+                fx_source=fx_rate.source if fx_rate else "not_used_non_cad_cost",
                 fx_timestamp=fx_rate.timestamp if fx_rate else 0.0,
                 fx_warning=fx_rate.warning if fx_rate else "",
                 stock=inventory_units,

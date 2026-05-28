@@ -17,7 +17,7 @@ class SmartInventoryRow:
     sku: str = ""
     color: str = ""
     cost_price: float | None = None
-    cost_currency: str = "CNY"
+    cost_currency: str = "CAD"
     inventory: int | None = None
     target_price: float | None = None
     notes: str = ""
@@ -230,7 +230,7 @@ def _field_from_header(header: str) -> str | None:
 
 def _normalize_currency(value: str) -> str:
     normalized = value.strip().upper()
-    return normalized if normalized in {"CNY", "CAD", "USD"} else "CNY"
+    return normalized if normalized in {"CNY", "CAD", "USD"} else "CAD"
 
 
 def _header_score(header: str) -> int:
