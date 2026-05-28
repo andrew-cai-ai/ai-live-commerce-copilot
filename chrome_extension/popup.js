@@ -1,4 +1,3 @@
-const STATUS_KEY = "aiLiveDirectorStatus";
 let manualInjectOverride = null;
 let memoryStatus = {};
 
@@ -72,19 +71,16 @@ function render(status) {
 
 function updateStatus(patch, callback) {
   memoryStatus = { ...memoryStatus, ...patch, updatedAt: Date.now() };
-  if (!hasChromeStorage()) {
+  if (!chrome.runtime || !chrome.runtime.sendMessage) {
     if (callback) callback();
     return;
   }
-  chrome.storage.local.get([STATUS_KEY], (result) => {
-    const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
-    const next = { ...current, ...memoryStatus };
-    chrome.storage.local.set({ [STATUS_KEY]: next }, callback);
+  chrome.runtime.sendMessage({
+    type: "AI_LIVE_DIRECTOR_STATUS_PATCH",
+    patch: memoryStatus
+  }, () => {
+    if (callback) callback();
   });
-}
-
-function hasChromeStorage() {
-  return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
 }
 
 function activeTabMatches(url) {
@@ -219,12 +215,16 @@ function injectCurrentTabDirect(reason) {
 }
 
 function refresh() {
-  if (!hasChromeStorage()) {
+  if (!chrome.runtime || !chrome.runtime.sendMessage) {
     render(memoryStatus);
     return;
   }
-  chrome.storage.local.get([STATUS_KEY], (result) => {
-    memoryStatus = { ...memoryStatus, ...((result && result[STATUS_KEY]) || {}) };
+  chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_GET_STATUS" }, (response) => {
+    if (chrome.runtime.lastError || !response || !response.state) {
+      render(memoryStatus);
+      return;
+    }
+    memoryStatus = { ...memoryStatus, ...response.state };
     render(memoryStatus);
   });
 }
@@ -233,11 +233,7 @@ document.getElementById("inject-now").addEventListener("click", injectCurrentTab
 
 document.getElementById("clear-status").addEventListener("click", () => {
   memoryStatus = {};
-  if (!hasChromeStorage()) {
-    refresh();
-    return;
-  }
-  chrome.storage.local.remove([STATUS_KEY], refresh);
+  updateStatus({}, refresh);
 });
 
 inspectActiveTab();

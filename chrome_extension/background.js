@@ -1,4 +1,4 @@
-const STATUS_KEY = "aiLiveDirectorStatus";
+let statusState = {};
 
 function activeTabMatches(url) {
   try {
@@ -12,20 +12,12 @@ function activeTabMatches(url) {
 }
 
 function statusPatch(patch, callback) {
-  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) {
-    if (callback) callback();
-    return;
-  }
-  chrome.storage.local.get([STATUS_KEY], (result) => {
-    const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
-    chrome.storage.local.set({
-      [STATUS_KEY]: {
-        ...current,
-        ...patch,
-        updatedAt: Date.now()
-      }
-    }, callback);
-  });
+  statusState = {
+    ...statusState,
+    ...patch,
+    updatedAt: Date.now()
+  };
+  if (callback) callback(statusState);
 }
 
 function inspectActiveTab(callback) {
@@ -91,6 +83,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "AI_LIVE_DIRECTOR_INSPECT_TAB") {
     inspectActiveTab((_tab, patch) => sendResponse({ ok: true, ...patch }));
     return true;
+  }
+  if (message.type === "AI_LIVE_DIRECTOR_STATUS_PATCH") {
+    statusPatch(message.patch || {}, (state) => sendResponse({ ok: true, state }));
+    return true;
+  }
+  if (message.type === "AI_LIVE_DIRECTOR_GET_STATUS") {
+    sendResponse({ ok: true, state: statusState });
+    return false;
   }
   if (message.type === "AI_LIVE_DIRECTOR_INJECT_ACTIVE_TAB") {
     injectActiveTab(sendResponse);

@@ -8,8 +8,6 @@
     "http://localhost:8000/api/live-ingest",
     "http://127.0.0.1:8000/api/live-ingest"
   ];
-  const STATUS_KEY = "aiLiveDirectorStatus";
-
   function now() {
     return Date.now();
   }
@@ -20,18 +18,13 @@
       updatedAt: now(),
       pageUrl: location.href
     };
-    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) {
+    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
       return;
     }
-    chrome.storage.local.get([STATUS_KEY], (result) => {
-      const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
-      chrome.storage.local.set({
-        [STATUS_KEY]: {
-          ...current,
-          ...nextPatch
-        }
-      });
-    });
+    chrome.runtime.sendMessage({
+      type: "AI_LIVE_DIRECTOR_STATUS_PATCH",
+      patch: nextPatch
+    }, () => {});
   }
 
   updateStatus({
