@@ -1,4 +1,9 @@
 (() => {
+  if (window.__aiLiveDirectorContentInjected) {
+    return;
+  }
+  window.__aiLiveDirectorContentInjected = true;
+
   const LOCAL_ENDPOINTS = [
     "http://localhost:8000/api/live-ingest",
     "http://127.0.0.1:8000/api/live-ingest"

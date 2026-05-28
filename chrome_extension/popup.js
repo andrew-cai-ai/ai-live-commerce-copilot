@@ -34,6 +34,8 @@ function render(status) {
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");
+  setText("active-tab", status.activeTabHost || "--", status.activeTabMatches ? "good" : status.activeTabHost ? "warn" : "");
+  setText("manual-inject", status.manualInjectStatus || "--", status.manualInjectStatus === "success" ? "good" : status.manualInjectStatus === "failed" ? "bad" : "");
   setText("error", status.lastError || "--", status.lastError ? "bad" : "");
 
   const hint = document.getElementById("hint");
@@ -56,15 +58,88 @@ function render(status) {
   hint.textContent = "链路已通。回到本地报告页，Payload source 应显示 extension。";
 }
 
+function updateStatus(patch, callback) {
+  chrome.storage.local.get([STATUS_KEY], (result) => {
+    const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
+    chrome.storage.local.set({ [STATUS_KEY]: { ...current, ...patch, updatedAt: Date.now() } }, callback);
+  });
+}
+
+function activeTabMatches(url) {
+  try {
+    const parsed = new URL(url || "");
+    return parsed.hostname === "liveplatform.taobao.com"
+      || parsed.hostname.endsWith(".taobao.com")
+      || parsed.hostname.endsWith(".tmall.com");
+  } catch (_error) {
+    return false;
+  }
+}
+
+function inspectActiveTab() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0] ? tabs[0] : {};
+    let host = "";
+    try {
+      host = new URL(tab.url || "").hostname;
+    } catch (_error) {
+      host = "";
+    }
+    updateStatus({
+      activeTabUrl: tab.url || "",
+      activeTabHost: host || "--",
+      activeTabMatches: activeTabMatches(tab.url || "")
+    }, refresh);
+  });
+}
+
+function injectCurrentTab() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0] ? tabs[0] : null;
+    if (!tab || !tab.id) {
+      updateStatus({ manualInjectStatus: "failed", lastError: "No active tab found." }, refresh);
+      return;
+    }
+    if (!activeTabMatches(tab.url || "")) {
+      updateStatus({
+        manualInjectStatus: "failed",
+        activeTabUrl: tab.url || "",
+        lastError: "Current tab is not a Taobao live backend page."
+      }, refresh);
+      return;
+    }
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      files: ["content.js"]
+    }, () => {
+      if (chrome.runtime.lastError) {
+        updateStatus({
+          manualInjectStatus: "failed",
+          lastError: chrome.runtime.lastError.message
+        }, refresh);
+        return;
+      }
+      updateStatus({
+        manualInjectStatus: "success",
+        manualInjectedAt: Date.now(),
+        lastError: ""
+      }, refresh);
+    });
+  });
+}
+
 function refresh() {
   chrome.storage.local.get([STATUS_KEY], (result) => {
     render(result && result[STATUS_KEY] ? result[STATUS_KEY] : {});
   });
 }
 
+document.getElementById("inject-now").addEventListener("click", injectCurrentTab);
+
 document.getElementById("clear-status").addEventListener("click", () => {
   chrome.storage.local.remove([STATUS_KEY], refresh);
 });
 
+inspectActiveTab();
 refresh();
 setInterval(refresh, 1000);
