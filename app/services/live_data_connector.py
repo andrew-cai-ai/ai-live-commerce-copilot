@@ -538,6 +538,17 @@ def _camelize(value: str) -> str:
 
 
 _ENCODED_VALUE_TYPE_MAP: dict[str, str] = {
+    "uv": "uv",
+    "pv": "pv",
+    "online_uv": "online_uv",
+    "heat_score": "heat_score",
+    "pay_amt": "pay_amt",
+    "pay_byr_rate": "pay_byr_rate",
+    "ipv_uv_rate": "ipv_uv_rate",
+    "stay_time_pu": "stay_time_pu",
+    "comment_uv": "comment_uv",
+    "pay_item_qty": "pay_item_qty",
+    "pay_buyer_cnt": "pay_buyer_cnt",
     "look_uv_td_d_live": "look_uv_td_d_live",
     "look_uv_5min_d_live": "look_uv_5min_d_live",
     "look_time_td_avg_d_live": "look_time_td_avg_d_live",
@@ -545,20 +556,6 @@ _ENCODED_VALUE_TYPE_MAP: dict[str, str] = {
     "pay_amt_5min_d_live": "pay_amt_5min_d_live",
     "pay_amt_td_d_shop": "pay_amt_td_d_shop",
     "pay_amt_5min_d_shop": "pay_amt_5min_d_shop",
-}
-
-_ENCODED_METRIC_TERMS: dict[str, tuple[str, ...]] = {
-    "look_uv_td_d_live": ("look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"),
-    "online_uv": ("online_uv", "onlineuv", "当前在线", "当前在线人数", "实时在线", "在线人数", "在线观众"),
-    "look_uv_5min_d_live": ("look_uv_5min_d_live", "lookuv5mindlive", "近5分钟观看", "近五分钟观看", "5分钟观看", "最近5分钟观看", "look_uv_5min"),
-    "heat_score": ("heat_score", "heatscore", "热度", "热力值"),
-    "pay_amt": ("pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"),
-    "pay_byr_rate": ("pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"),
-    "ipv_uv_rate": ("ipv_uv_rate", "ipvuvrate", "点击率", "商品点击率", "进店率"),
-    "stay_time_pu": ("stay_time_pu", "staytimepu", "停留时长", "观看时长", "人均停留"),
-    "comment_uv": ("comment_uv", "commentuv", "评论人数", "评论用户", "评论"),
-    "pay_item_qty": ("pay_item_qty", "payitemqty", "成交件数", "支付件数", "销量"),
-    "pay_buyer_cnt": ("pay_buyer_cnt", "paybuyercnt", "成交人数", "支付买家数", "买家数"),
 }
 
 
@@ -575,7 +572,7 @@ def _extract_taobao_encoded_metrics(payload: Any) -> dict[str, float]:
                 parsed = _parse_encoded_metric_row(row)
                 if not parsed:
                     continue
-                field = _metric_field_from_value_type(parsed["value_type"]) or _metric_field_from_label(parsed["label"])
+                field = _metric_field_from_value_type(parsed["value_type"])
                 if field and field not in metrics:
                     metrics[field] = parsed["numeric_value"]
     return metrics
@@ -613,18 +610,10 @@ def _parse_encoded_metric_row(row: Any) -> dict[str, Any] | None:
     numeric_value = _to_number(parts[3] if len(parts) > 3 else parts[2] if len(parts) > 2 else "")
     return {
         "label": " ".join(label_parts),
-        "value_type": parts[1] if len(parts) > 1 else "",
+        "value_type": str(row.get("valueType") or row.get("value_type") or (parts[1] if len(parts) > 1 else "")),
         "display_value": parts[2] if len(parts) > 2 else "",
         "numeric_value": numeric_value,
     }
-
-
-def _metric_field_from_label(label: str) -> str:
-    normalized = re.sub(r"[\s_\-]+", "", label.lower())
-    for field, terms in _ENCODED_METRIC_TERMS.items():
-        if any(re.sub(r"[\s_\-]+", "", term.lower()) in normalized for term in terms):
-            return field
-    return ""
 
 
 def _metric_field_from_value_type(value_type: str) -> str:

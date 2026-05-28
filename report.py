@@ -1077,6 +1077,17 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         return metricMissing(metrics, key) ? "missing" : formatPercent(value);
       }
 
+      function metricMoneyText(metrics, key, value) {
+        return metricMissing(metrics, key) ? "missing" : formatMoney(value);
+      }
+
+      function totalViewerText(metrics) {
+        if (!metricMissing(metrics, "look_uv_td_d_live")) {
+          return metricNumberText(metrics, "look_uv_td_d_live", metrics.look_uv_td_d_live);
+        }
+        return metricNumberText(metrics, "uv", metrics.uv || metrics.viewer_count);
+      }
+
       function escapeHtml(text) {
         const node = document.createElement("div");
         node.textContent = String(text || "");
@@ -1175,6 +1186,17 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       const encodedValueTypeMap = {
+        uv: "uv",
+        pv: "pv",
+        online_uv: "online_uv",
+        heat_score: "heat_score",
+        pay_amt: "pay_amt",
+        pay_byr_rate: "pay_byr_rate",
+        ipv_uv_rate: "ipv_uv_rate",
+        stay_time_pu: "stay_time_pu",
+        comment_uv: "comment_uv",
+        pay_item_qty: "pay_item_qty",
+        pay_buyer_cnt: "pay_buyer_cnt",
         look_uv_td_d_live: "look_uv_td_d_live",
         look_uv_5min_d_live: "look_uv_5min_d_live",
         look_time_td_avg_d_live: "look_time_td_avg_d_live",
@@ -1183,20 +1205,6 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         pay_amt_td_d_shop: "pay_amt_td_d_shop",
         pay_amt_5min_d_shop: "pay_amt_5min_d_shop"
       };
-
-      const encodedMetricMap = [
-        { field: "look_uv_td_d_live", terms: ["look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"] },
-        { field: "online_uv", terms: ["online_uv", "onlineuv", "当前在线", "当前在线人数", "实时在线", "在线人数", "在线观众"] },
-        { field: "look_uv_5min_d_live", terms: ["look_uv_5min_d_live", "lookuv5mindlive", "近5分钟观看", "近五分钟观看", "5分钟观看", "最近5分钟观看", "look_uv_5min"] },
-        { field: "heat_score", terms: ["heat_score", "heatscore", "热度", "热力值"] },
-        { field: "pay_amt", terms: ["pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"] },
-        { field: "pay_byr_rate", terms: ["pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"] },
-        { field: "ipv_uv_rate", terms: ["ipv_uv_rate", "ipvuvrate", "点击率", "商品点击率", "进店率"] },
-        { field: "stay_time_pu", terms: ["stay_time_pu", "staytimepu", "停留时长", "观看时长", "人均停留"] },
-        { field: "comment_uv", terms: ["comment_uv", "commentuv", "评论人数", "评论用户", "评论"] },
-        { field: "pay_item_qty", terms: ["pay_item_qty", "payitemqty", "成交件数", "支付件数", "销量"] },
-        { field: "pay_buyer_cnt", terms: ["pay_buyer_cnt", "paybuyercnt", "成交人数", "支付买家数", "买家数"] }
-      ];
 
       function extractTaobaoDataListMetrics(payload) {
         const metrics = {};
@@ -1210,7 +1218,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
               if (!parsed) {
                 return;
               }
-              const field = metricFieldFromValueType(parsed.valueType) || metricFieldFromLabel(parsed.label);
+              const field = metricFieldFromValueType(parsed.valueType);
               if (field && metrics[field] === undefined) {
                 metrics[field] = parsed.numericValue;
               }
@@ -1244,7 +1252,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (!rawValue) {
           return null;
         }
-        const decoded = decodeURIComponent(String(rawValue));
+        const decoded = safeDecodeURIComponent(rawValue);
         const parts = decoded.split(",");
         const labelParts = [
           row.key,
@@ -1260,22 +1268,18 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
         return {
           label: labelParts.join(" "),
-          valueType: parts[1] || "",
+          valueType: row.valueType || row.value_type || parts[1] || "",
           displayValue: parts[2] || "",
           numericValue: numericValue
         };
       }
 
-      function metricFieldFromLabel(label) {
-        const normalized = String(label || "").toLowerCase().replace(/[\\s_\\-]+/g, "");
-        for (const item of encodedMetricMap) {
-          if (item.terms.some(function(term) {
-            return normalized.includes(String(term).toLowerCase().replace(/[\\s_\\-]+/g, ""));
-          })) {
-            return item.field;
-          }
+      function safeDecodeURIComponent(value) {
+        try {
+          return decodeURIComponent(String(value));
+        } catch (error) {
+          return String(value || "");
         }
-        return "";
       }
 
       function metricFieldFromValueType(valueType) {
@@ -2084,7 +2088,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? "Using pasted/manual live payload via connector · updates every 5s"
             : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
         );
-        document.getElementById("viewer-count").textContent = metricNumberText(metrics, "look_uv_td_d_live", metrics.viewer_count);
+        document.getElementById("viewer-count").textContent = totalViewerText(metrics);
         document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
         document.getElementById("recent-5min-viewers").textContent = metricNumberText(metrics, "look_uv_5min_d_live", metrics.look_uv_5min_d_live);
         document.getElementById("ctr").textContent = metricPercentText(metrics, "ipv_uv_rate", metrics.item_click_rate);
@@ -2094,7 +2098,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("ai-live-score").textContent = Math.round(liveScore * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
-        document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
+        document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = data.product_level_connected ? "--" : "Product-level metrics not connected yet.";
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
@@ -2146,7 +2150,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             ? liveStatusText
             : "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
         );
-        document.getElementById("viewer-count").textContent = metricNumberText(metrics, "look_uv_td_d_live", metrics.viewer_count);
+        document.getElementById("viewer-count").textContent = totalViewerText(metrics);
         document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
         document.getElementById("recent-5min-viewers").textContent = metricNumberText(metrics, "look_uv_5min_d_live", metrics.look_uv_5min_d_live);
         document.getElementById("ctr").textContent = metricPercentText(metrics, "ipv_uv_rate", metrics.ipv_uv_rate);
@@ -2156,7 +2160,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
-        document.getElementById("live-item-gmv").textContent = formatMoney(metrics.item_gmv || metrics.pay_amt || 0);
+        document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = metrics.jiangJieEffect ? Math.round(metrics.jiangJieEffect) : "--";
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
