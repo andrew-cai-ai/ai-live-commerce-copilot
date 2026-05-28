@@ -81,20 +81,7 @@ function activeTabMatches(url) {
 }
 
 function inspectActiveTab() {
-  let responded = false;
-  window.setTimeout(() => {
-    if (!responded) {
-      inspectActiveTabDirect("Background inspect timed out.");
-    }
-  }, 800);
-  chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INSPECT_TAB" }, (response) => {
-    responded = true;
-    if (chrome.runtime.lastError) {
-      inspectActiveTabDirect(chrome.runtime.lastError.message);
-      return;
-    }
-    updateStatus(response || {}, refresh);
-  });
+  inspectActiveTabDirect("");
 }
 
 function inspectActiveTabDirect(errorMessage) {
@@ -119,20 +106,8 @@ function inspectActiveTabDirect(errorMessage) {
 
 function injectCurrentTab() {
   setText("manual-inject", "running", "warn");
-  updateStatus({ manualInjectStatus: "running", lastError: "" }, refresh);
-  let responded = false;
-  window.setTimeout(() => {
-    if (!responded) {
-      injectCurrentTabDirect("Background injection timed out; used popup fallback.");
-    }
-  }, 1200);
-  chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INJECT_ACTIVE_TAB" }, (response) => {
-    responded = true;
-    if (chrome.runtime.lastError) {
-      injectCurrentTabDirect(chrome.runtime.lastError.message);
-      return;
-    }
-    updateStatus(response || { manualInjectStatus: "failed", lastError: "No background response." }, refresh);
+  updateStatus({ manualInjectStatus: "running", lastError: "", clickedAt: Date.now() }, () => {
+    injectCurrentTabDirect("");
   });
 }
 
@@ -182,7 +157,7 @@ function injectCurrentTabDirect(reason) {
         activeTabMatches: true,
         manualInjectStatus: "success",
         manualInjectedAt: Date.now(),
-        backgroundFallbackUsed: true,
+        popupDirectInjectUsed: true,
         lastError: reason || ""
       }, refresh);
     });
