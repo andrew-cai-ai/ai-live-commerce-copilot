@@ -120,6 +120,13 @@ def install_guide(request: Request) -> str:
     return _render_install_guide()
 
 
+@app.get("/admin/live", response_class=HTMLResponse)
+def admin_live(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_admin_live()
+
+
 @app.post("/login")
 def login(password: str = Form("")):
     if not password_matches(password):
@@ -463,7 +470,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/live">打开主播控制台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/live">打开主播控制台</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -919,6 +926,129 @@ def _render_install_guide() -> str:
 </html>"""
 
 
+def _render_admin_live() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>直播监控后台</title>
+  <style>
+    :root { color-scheme: light; --ink: #16211f; --muted: #5b6764; --line: #d6dfdb; --paper: #f7f9f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; --warn: #a16207; --danger: #b42318; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }
+    main { max-width: 1200px; margin: 0 auto; padding: 28px 18px 56px; }
+    header { display: flex; justify-content: space-between; gap: 18px; align-items: flex-end; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 32px; }
+    a { color: var(--accent); font-weight: 900; text-decoration: none; }
+    .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .card, .room { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .card span, .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0; }
+    .card b { display: block; font-size: 30px; margin-top: 4px; }
+    .rooms { display: grid; gap: 12px; }
+    .room-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+    .room h2 { margin: 0; font-size: 20px; }
+    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 6px 9px; font-weight: 900; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+    .pill.warn { background: #fef3c7; color: var(--warn); }
+    .pill.bad { background: #fee2e2; color: var(--danger); }
+    .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; min-width: 0; }
+    .metric b { display: block; font-size: 18px; overflow-wrap: anywhere; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .button { display: inline-flex; border-radius: 8px; background: var(--accent); color: #fff; padding: 8px 10px; }
+    .empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 26px; color: var(--muted); text-align: center; font-weight: 800; }
+    .small { color: var(--muted); font-size: 13px; }
+    @media (max-width: 900px) { .summary, .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } header { display: block; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>直播监控后台</h1>
+        <div class="small">查看所有主播插件连接状态和实时指标</div>
+      </div>
+      <div><a href="/live">主播控制台</a> · <a href="/install">插件安装</a> · <a href="/">返回首页</a></div>
+    </header>
+    <section class="summary">
+      <div class="card"><span>活跃直播间</span><b id="active-count">--</b></div>
+      <div class="card"><span>有效数据</span><b id="valid-count">--</b></div>
+      <div class="card"><span>总 GMV</span><b id="total-gmv">--</b></div>
+      <div class="card"><span>最近更新</span><b id="latest-update">--</b></div>
+    </section>
+    <section class="rooms" id="rooms"><div class="empty">等待插件数据...</div></section>
+  </main>
+  <script>
+    function fmtNumber(value) {
+      const numeric = Number(value || 0);
+      return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--";
+    }
+    function fmtMoney(value) {
+      const numeric = Number(value || 0);
+      return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--";
+    }
+    function fmtPercent(value) {
+      const numeric = Number(value || 0);
+      return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--";
+    }
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+    }
+    function ageText(age) {
+      if (age === null || age === undefined) return "--";
+      if (age < 60) return Math.round(age) + "s";
+      return Math.round(age / 60) + "m";
+    }
+    function statusPill(session) {
+      const age = Number(session.age_seconds || 9999);
+      if (!session.valid_live_metrics) return '<span class="pill bad">无有效指标</span>';
+      if (age > 45) return '<span class="pill warn">连接变慢 · ' + ageText(age) + '</span>';
+      return '<span class="pill">在线 · ' + ageText(age) + '</span>';
+    }
+    async function refresh() {
+      const response = await fetch("/api/live/sessions");
+      const data = await response.json();
+      const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+      const fresh = sessions.filter((item) => item.age_seconds === null || item.age_seconds <= 120);
+      document.getElementById("active-count").textContent = fmtNumber(fresh.length);
+      document.getElementById("valid-count").textContent = fmtNumber(fresh.filter((item) => item.valid_live_metrics).length);
+      document.getElementById("total-gmv").textContent = fmtMoney(fresh.reduce((sum, item) => sum + Number(item.pay_amt || 0), 0));
+      document.getElementById("latest-update").textContent = fresh.length ? ageText(fresh[0].age_seconds) + " ago" : "--";
+      const node = document.getElementById("rooms");
+      if (!sessions.length) {
+        node.innerHTML = '<div class="empty">暂无直播间数据。让主播打开淘宝直播中控页并启用 Chrome 插件。</div>';
+        return;
+      }
+      node.innerHTML = sessions.slice(0, 20).map((session) => {
+        const liveUrl = "/live?host_id=" + encodeURIComponent(session.host_id || "default");
+        const metrics = [
+          ["总观看", fmtNumber(session.total_viewers)],
+          ["在线", fmtNumber(session.online_uv)],
+          ["GMV", fmtMoney(session.pay_amt)],
+          ["热度", fmtNumber(session.heat_score)],
+          ["CTR", fmtPercent(session.ipv_uv_rate)],
+          ["CVR", fmtPercent(session.pay_byr_rate)],
+          ["当前商品", session.current_product || "--"],
+          ["最新动作", session.current_action || "--"],
+          ["快照数", fmtNumber(session.snapshot_count)],
+          ["商品级数据", session.product_level_connected ? "已连接" : "未连接"],
+          ["来源", session.source || "--"],
+          ["Live ID", session.live_id || "--"]
+        ].map((item) => '<div class="metric"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
+        return '<article class="room">'
+          + '<div class="room-head"><div><h2>' + escapeHtml(session.host_id || "default") + '</h2><div class="small">Last updated: ' + ageText(session.age_seconds) + ' ago</div></div>' + statusPill(session) + '</div>'
+          + '<div class="metrics">' + metrics + '</div>'
+          + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a></div>'
+          + '</article>';
+      }).join("");
+    }
+    refresh();
+    window.setInterval(refresh, 5000);
+  </script>
+</body>
+</html>"""
+
+
 def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> str:
     if not rows:
         return ""
@@ -972,7 +1102,7 @@ def _inject_report_history_banner(report_html: str, report_id: str) -> str:
     <section class="order-panel">
       <h2>报告已保存</h2>
       <p>报告 ID：{html.escape(report_id)}</p>
-      <p><a href="/live">打开主播控制台</a> · <a href="/install">插件安装教程</a> · <a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+      <p><a href="/live">打开主播控制台</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     </section>"""
     return report_html.replace("<main>", f"<main>{banner}", 1)
 

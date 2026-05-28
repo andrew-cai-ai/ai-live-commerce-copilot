@@ -160,6 +160,7 @@ class LiveDataConnector:
         rows = []
         for host_id, session in self.sessions.items():
             latest_snapshot = session.snapshots[-1] if session.snapshots else None
+            latest_action = session.action_history[-1] if session.action_history else {}
             rows.append({
                 "host_id": host_id,
                 "live_id": _pick(session.latest_ingested_payload or {}, "liveId", "live_id", "room_id") or host_id,
@@ -167,6 +168,16 @@ class LiveDataConnector:
                 "age_seconds": round(now - (session.latest_ingested_at or 0), 1) if session.latest_ingested_at else None,
                 "source": _pick(session.latest_ingested_payload or {}, "source") or (latest_snapshot.source if latest_snapshot else ""),
                 "valid_live_metrics": _has_valid_live_metrics(latest_snapshot) if latest_snapshot else False,
+                "current_action": latest_action.get("decision", ""),
+                "current_product": latest_snapshot.current_product if latest_snapshot else "",
+                "online_uv": latest_snapshot.online_uv if latest_snapshot else 0,
+                "total_viewers": (latest_snapshot.total_live_viewers or latest_snapshot.uv) if latest_snapshot else 0,
+                "heat_score": latest_snapshot.heat_score if latest_snapshot else 0,
+                "pay_amt": latest_snapshot.pay_amt if latest_snapshot else 0,
+                "ipv_uv_rate": latest_snapshot.ipv_uv_rate if latest_snapshot else 0,
+                "pay_byr_rate": latest_snapshot.pay_byr_rate if latest_snapshot else 0,
+                "snapshot_count": len(session.snapshots),
+                "product_level_connected": _has_product_level_metrics(latest_snapshot) if latest_snapshot else False,
                 "metric_keys": sorted(
                     key for key, value in (session.latest_ingested_payload or {}).items()
                     if key not in {"source", "liveId", "live_id", "host_id", "room_id", "timestamp", "captured_api", "interactSecKill"}
