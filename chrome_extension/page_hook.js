@@ -195,6 +195,11 @@
     );
   }
 
+  function hostIdFromLiveId(liveId) {
+    const value = String(liveId || DEFAULT_LIVE_ID).trim();
+    return value || DEFAULT_LIVE_ID;
+  }
+
   function assignKnownMetric(target, source, field, normalizer = toNumber) {
     const value = pick(source, field);
     if (value !== undefined) {
@@ -240,6 +245,8 @@
 
     return {
       source: "chrome_extension",
+      host_id: hostIdFromLiveId(liveId),
+      room_id: liveId,
       liveId,
       timestamp: new Date().toISOString(),
       captured_api: TARGET_API,
@@ -253,6 +260,8 @@
     const currentMetrics = current.metrics || {};
     return {
       source: "chrome_extension",
+      host_id: current.host_id || previous.host_id || hostIdFromLiveId(current.liveId || previous.liveId),
+      room_id: current.room_id || previous.room_id || current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       liveId: current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       timestamp: current.timestamp || new Date().toISOString(),
       captured_api: TARGET_API,

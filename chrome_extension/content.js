@@ -70,6 +70,7 @@
     const payload = event.data.payload || {};
     updateStatus({
       lastPayloadReadyAt: now(),
+      hostId: payload.host_id || payload.liveId || "",
       liveId: payload.liveId || "",
       metricKeys: Object.keys(payload.metrics || {}),
       eventCount: Array.isArray(payload.events) ? payload.events.length : 0

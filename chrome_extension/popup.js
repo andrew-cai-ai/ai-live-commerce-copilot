@@ -36,6 +36,7 @@ function render(status) {
   setText("send-success", sent[0], sent[1]);
   setText("last-captured", timeText(status.lastCapturedAt));
   setText("last-sent", timeText(status.lastSentAt));
+  setText("host-id", status.hostId || status.liveId || "--");
   setText("live-id", status.liveId || "--");
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));

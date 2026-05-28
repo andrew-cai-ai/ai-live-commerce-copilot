@@ -35,6 +35,7 @@ class ProductEvent:
 @dataclass
 class LiveMetricSnapshot:
     timestamp: float
+    host_id: str = "default"
     online_uv: float = 0.0
     uv: float = 0.0
     pv: float = 0.0
@@ -96,9 +97,18 @@ class LiveDecision:
     trend_60s: dict[str, str]
     snapshot: LiveMetricSnapshot
     source: str
+    host_id: str = "default"
     missing_metrics: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LiveSessionState:
+    latest_ingested_payload: dict[str, Any] | None = None
+    latest_ingested_at: float = 0.0
+    snapshots: list[LiveMetricSnapshot] = field(default_factory=list)
+    action_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 class LiveDataConnector:
@@ -110,56 +120,113 @@ class LiveDataConnector:
         self.action_history: list[dict[str, Any]] = []
         self.latest_ingested_payload: dict[str, Any] | None = None
         self.latest_ingested_at: float = 0.0
+        self.sessions: dict[str, LiveSessionState] = {}
 
     def get_decision(
         self,
         payload: dict[str, Any] | None = None,
         products: list[dict[str, Any]] | None = None,
+        host_id: str | None = None,
     ) -> LiveDecision:
         warnings: list[str] = []
-        data, source = self._fetch_live_payload(payload, warnings)
+        requested_host_id = _host_id_from_payload(payload, host_id)
+        session = self._session(requested_host_id)
+        data, source, resolved_host_id = self._fetch_live_payload(payload, warnings, requested_host_id)
+        session = self._session(resolved_host_id)
         missing_metrics = _missing_required_metrics(data)
-        snapshot = self._build_snapshot(data, source)
-        self._store_snapshot(snapshot)
-        trend_30s = self._trend_for(snapshot, 30)
-        trend_60s = self._trend_for(snapshot, 60)
+        snapshot = self._build_snapshot(data, source, resolved_host_id)
+        self._store_snapshot(snapshot, session)
+        trend_30s = self._trend_for(snapshot, 30, session)
+        trend_60s = self._trend_for(snapshot, 60, session)
         decision = self._decide(snapshot, trend_30s, trend_60s, products or [], missing_metrics)
-        self._record_action(decision)
+        self._record_action(decision, session)
         decision.warnings.extend(warnings)
         return decision
 
     def ingest_live_metrics(self, payload: dict[str, Any]) -> LiveDecision:
-        self.latest_ingested_payload = _normalize_ingested_payload(payload)
+        normalized_payload = _normalize_ingested_payload(payload)
+        host_id = _host_id_from_payload(normalized_payload, None)
+        normalized_payload["host_id"] = host_id
+        normalized_payload.setdefault("room_id", host_id)
+        session = self._session(host_id)
+        session.latest_ingested_payload = normalized_payload
+        session.latest_ingested_at = time.time()
+        self.latest_ingested_payload = normalized_payload
         self.latest_ingested_at = time.time()
-        return self.get_decision(payload=self.latest_ingested_payload)
+        return self.get_decision(payload=self.latest_ingested_payload, host_id=host_id)
 
-    def _record_action(self, decision: LiveDecision) -> None:
+    def active_sessions(self) -> list[dict[str, Any]]:
+        now = time.time()
+        rows = []
+        for host_id, session in self.sessions.items():
+            latest_snapshot = session.snapshots[-1] if session.snapshots else None
+            rows.append({
+                "host_id": host_id,
+                "live_id": _pick(session.latest_ingested_payload or {}, "liveId", "live_id", "room_id") or host_id,
+                "last_updated": session.latest_ingested_at or (latest_snapshot.timestamp if latest_snapshot else 0),
+                "age_seconds": round(now - (session.latest_ingested_at or 0), 1) if session.latest_ingested_at else None,
+                "source": _pick(session.latest_ingested_payload or {}, "source") or (latest_snapshot.source if latest_snapshot else ""),
+                "valid_live_metrics": _has_valid_live_metrics(latest_snapshot) if latest_snapshot else False,
+                "metric_keys": sorted(
+                    key for key, value in (session.latest_ingested_payload or {}).items()
+                    if key not in {"source", "liveId", "live_id", "host_id", "room_id", "timestamp", "captured_api", "interactSecKill"}
+                    and value is not None
+                ),
+            })
+        return sorted(rows, key=lambda item: item.get("last_updated") or 0, reverse=True)
+
+    def _session(self, host_id: str) -> LiveSessionState:
+        if host_id not in self.sessions:
+            self.sessions[host_id] = LiveSessionState()
+        return self.sessions[host_id]
+
+    def _fresh_sessions(self) -> list[tuple[str, LiveSessionState]]:
+        now = time.time()
+        return [
+            (host_id, session)
+            for host_id, session in self.sessions.items()
+            if session.latest_ingested_payload and now - session.latest_ingested_at <= 30
+        ]
+
+    def _record_action(self, decision: LiveDecision, session: LiveSessionState) -> None:
         entry = _timeline_entry(decision)
-        last = self.action_history[-1] if self.action_history else None
+        last = session.action_history[-1] if session.action_history else None
         if last and not _should_append_timeline_entry(last, entry):
             last["last_seen"] = entry["timestamp"]
             last["repeat_count"] = int(last.get("repeat_count") or 1) + 1
             last["confidence"] = entry["confidence"]
             last["current_live_score"] = entry["current_live_score"]
-            decision.timeline = list(reversed(self.action_history))
+            decision.timeline = list(reversed(session.action_history))
             return
 
-        self.action_history.append(entry)
-        self.action_history = self.action_history[-10:]
-        decision.timeline = list(reversed(self.action_history))
+        session.action_history.append(entry)
+        session.action_history = session.action_history[-10:]
+        self.action_history = session.action_history
+        decision.timeline = list(reversed(session.action_history))
 
     def _fetch_live_payload(
         self,
         payload: dict[str, Any] | None,
         warnings: list[str],
-    ) -> tuple[dict[str, Any], str]:
-        if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
-            return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
+        host_id: str,
+    ) -> tuple[dict[str, Any], str, str]:
+        session = self._session(host_id)
+        if session.latest_ingested_payload and time.time() - session.latest_ingested_at <= 30:
+            return _unwrap_payload(session.latest_ingested_payload), "chrome_extension", host_id
+
+        fresh_sessions = self._fresh_sessions()
+        if host_id == "default" and len(fresh_sessions) == 1:
+            active_host_id, active_session = fresh_sessions[0]
+            warnings.append(f"Using only active live room: {active_host_id}")
+            return _unwrap_payload(active_session.latest_ingested_payload), "chrome_extension", active_host_id
+        if host_id == "default" and len(fresh_sessions) > 1:
+            warnings.append("Multiple active live rooms detected. Set host_id/liveId to choose one.")
 
         if payload:
             normalized_payload = _normalize_ingested_payload(payload)
             source = "chrome_extension" if normalized_payload.get("source") == "chrome_extension" else "page_payload"
-            return _unwrap_payload(normalized_payload), source
+            resolved_host_id = _host_id_from_payload(normalized_payload, host_id)
+            return _unwrap_payload(normalized_payload), source, resolved_host_id
 
         if self.api_url:
             try:
@@ -168,14 +235,16 @@ class LiveDataConnector:
                     headers["Authorization"] = f"Bearer {self.api_token}"
                 response = requests.get(self.api_url, headers=headers, timeout=self.timeout)
                 response.raise_for_status()
-                return _unwrap_payload(response.json()), "real_api"
+                normalized_payload = _normalize_ingested_payload(response.json())
+                resolved_host_id = _host_id_from_payload(normalized_payload, host_id)
+                return _unwrap_payload(normalized_payload), "real_api", resolved_host_id
             except Exception as exc:
                 warnings.append(f"Live metrics API failed, using fallback data: {exc}")
 
         warnings.append("No live metrics connector data found.")
-        return {}, "no_connector"
+        return {}, "no_connector", host_id
 
-    def _build_snapshot(self, data: dict[str, Any], source: str) -> LiveMetricSnapshot:
+    def _build_snapshot(self, data: dict[str, Any], source: str, host_id: str) -> LiveMetricSnapshot:
         total_stats = _find_dict(data, "totalStats") or data
         data_region = _find_dict(data, "dataRegion") or {}
         events = _parse_product_events(_find_value(data, "interactSecKill"))
@@ -207,6 +276,7 @@ class LiveDataConnector:
         pay_amt_5min_d_shop = _to_number(_pick(data_region, "pay_amt_5min_d_shop") or _pick(data, "pay_amt_5min_d_shop"))
         return LiveMetricSnapshot(
             timestamp=time.time(),
+            host_id=host_id,
             online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv")),
             uv=_to_number(_pick(total_stats, "uv")),
             pv=_to_number(_pick(total_stats, "pv")),
@@ -248,13 +318,15 @@ class LiveDataConnector:
             source=source,
         )
 
-    def _store_snapshot(self, snapshot: LiveMetricSnapshot) -> None:
-        self.snapshots.append(snapshot)
+    def _store_snapshot(self, snapshot: LiveMetricSnapshot, session: LiveSessionState) -> None:
+        session.snapshots.append(snapshot)
         cutoff = time.time() - 5 * 60
+        session.snapshots = [item for item in session.snapshots if item.timestamp >= cutoff]
+        self.snapshots.append(snapshot)
         self.snapshots = [item for item in self.snapshots if item.timestamp >= cutoff]
 
-    def _trend_for(self, current: LiveMetricSnapshot, seconds: int) -> dict[str, str]:
-        previous = self._snapshot_ago(seconds)
+    def _trend_for(self, current: LiveMetricSnapshot, seconds: int, session: LiveSessionState) -> dict[str, str]:
+        previous = self._snapshot_ago(seconds, session)
         if previous is None:
             return {key: "stable" for key in _TREND_FIELDS}
         return {
@@ -262,10 +334,10 @@ class LiveDataConnector:
             for field in _TREND_FIELDS
         }
 
-    def _snapshot_ago(self, seconds: int) -> LiveMetricSnapshot | None:
+    def _snapshot_ago(self, seconds: int, session: LiveSessionState) -> LiveMetricSnapshot | None:
         target = time.time() - seconds
         candidate = None
-        for snapshot in self.snapshots:
+        for snapshot in session.snapshots:
             if snapshot.timestamp <= target:
                 candidate = snapshot
         return candidate
@@ -378,6 +450,7 @@ class LiveDataConnector:
             trend_60s=trend_60s,
             snapshot=snapshot,
             source=snapshot.source,
+            host_id=snapshot.host_id,
             missing_metrics=missing_metrics,
         )
 
@@ -494,6 +567,31 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
     return {**payload, **encoded_metrics}
 
 
+def _host_id_from_payload(payload: Any, explicit_host_id: str | None = None) -> str:
+    if explicit_host_id and str(explicit_host_id).strip():
+        return _clean_host_id(explicit_host_id)
+    if not isinstance(payload, dict):
+        return "default"
+    value = (
+        _pick(payload, "host_id", "hostId", "room_id", "roomId", "liveId", "live_id")
+        or _find_value(payload, "host_id")
+        or _find_value(payload, "hostId")
+        or _find_value(payload, "room_id")
+        or _find_value(payload, "roomId")
+        or _find_value(payload, "liveId")
+        or _find_value(payload, "live_id")
+    )
+    return _clean_host_id(value)
+
+
+def _clean_host_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"None", "null", "undefined"}:
+        return "default"
+    text = re.sub(r"[^A-Za-z0-9_.:-]+", "-", text)
+    return text[:80] or "default"
+
+
 def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
@@ -507,7 +605,7 @@ def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     events = payload.get("events")
     if isinstance(events, list):
         normalized["interactSecKill"] = events
-    for key in ("source", "liveId", "timestamp", "captured_at", "captured_api"):
+    for key in ("source", "liveId", "live_id", "host_id", "hostId", "room_id", "roomId", "timestamp", "captured_at", "captured_api"):
         if payload.get(key) is not None:
             normalized[key] = payload[key]
     normalized["source"] = payload.get("source") or "chrome_extension"

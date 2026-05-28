@@ -157,7 +157,9 @@ def render_report_page(
     .suggestions {{ margin-top: 12px; border-left: 4px solid var(--accent); background: #f3f8f5; border-radius: 0 8px 8px 0; padding: 10px 14px; }}
     .suggestions b {{ color: var(--accent); }}
     .live-input {{ margin-top: 12px; }}
+    .live-input input {{ width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fbfdfb; margin-top: 6px; }}
     .live-input textarea {{ width: 100%; min-height: 120px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #fbfdfb; }}
+    .session-chip {{ border: 1px solid var(--line); border-radius: 999px; background: #fbfdfb; color: var(--accent); padding: 5px 8px; margin: 4px 4px 0 0; font-weight: 800; cursor: pointer; }}
     .manual-live-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }}
     .manual-live-grid input {{ width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px; background: #fbfdfb; }}
     .decision-card {{ margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fff; }}
@@ -774,6 +776,10 @@ def _render_live_mode_dashboard() -> str:
           <h2>Live Director Mode</h2>
           <span class="live-status" id="live-status">Mock livestream simulator · updates every 5s</span>
         </div>
+        <div class="live-input" style="margin-bottom:12px;">
+          <b>Live room / host ID</b>
+          <input id="live-host-id" placeholder="default 或 liveId，例如 566949664239">
+        </div>
         <div class="director-priority">
           <div class="director-now">
             <span>Current action</span>
@@ -894,12 +900,14 @@ def _render_live_mode_dashboard() -> str:
           <div class="metrics">
             <div class="metric"><span>Payload source</span><b id="debug-payload-source">--</b></div>
             <div class="metric"><span>Payload parse success</span><b id="debug-parse-success">false</b></div>
+            <div class="metric"><span>Host / room ID</span><b id="debug-host-id">--</b></div>
             <div class="metric"><span>online_uv</span><b id="debug-online-uv">--</b></div>
             <div class="metric"><span>heat_score</span><b id="debug-heat-score">--</b></div>
             <div class="metric"><span>pay_amt</span><b id="debug-pay-amt">--</b></div>
             <div class="metric"><span>source</span><b id="debug-live-source">--</b></div>
             <div class="metric"><span>Last updated</span><b id="debug-last-updated">--</b></div>
           </div>
+          <div style="margin-top:10px;"><b>Active cloud rooms</b>: <span id="active-live-sessions">--</span></div>
         </div>
         <div class="live-input">
           <b>Manual fallback mode</b>
@@ -992,6 +1000,92 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         hasPastedTextareaContent: false,
         payloadParseSuccess: false
       };
+
+      function initialLiveHostId() {
+        try {
+          const params = new URLSearchParams(window.location.search || "");
+          return params.get("host_id") || params.get("liveId") || window.localStorage.getItem("ai_live_host_id") || "default";
+        } catch (error) {
+          return "default";
+        }
+      }
+
+      function liveHostId() {
+        const input = document.getElementById("live-host-id");
+        const value = input ? input.value.trim() : "";
+        return value || initialLiveHostId() || "default";
+      }
+
+      function bindLiveHostInput() {
+        const input = document.getElementById("live-host-id");
+        if (!input) {
+          return;
+        }
+        input.value = initialLiveHostId();
+        input.addEventListener("input", function() {
+          try {
+            window.localStorage.setItem("ai_live_host_id", input.value.trim() || "default");
+          } catch (error) {}
+          const hostNode = document.getElementById("debug-host-id");
+          if (hostNode) {
+            hostNode.textContent = liveHostId();
+          }
+        });
+        const hostNode = document.getElementById("debug-host-id");
+        if (hostNode) {
+          hostNode.textContent = liveHostId();
+        }
+      }
+
+      async function refreshActiveLiveSessions() {
+        const node = document.getElementById("active-live-sessions");
+        if (!node) {
+          return;
+        }
+        try {
+          const response = await fetch("/api/live/sessions");
+          if (!response.ok) {
+            return;
+          }
+          const data = await response.json();
+          const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+          const fresh = sessions.filter(function(item) {
+            return item && (item.age_seconds === null || item.age_seconds <= 45);
+          }).slice(0, 5);
+          if (!fresh.length) {
+            node.textContent = "等待插件数据...";
+            return;
+          }
+          const input = document.getElementById("live-host-id");
+          if (input && (!input.value.trim() || input.value.trim() === "default") && fresh.length === 1) {
+            input.value = fresh[0].host_id || "default";
+            try {
+              window.localStorage.setItem("ai_live_host_id", input.value);
+            } catch (error) {}
+          }
+          node.innerHTML = fresh.map(function(item) {
+            const age = item.age_seconds === null ? "--" : Math.round(item.age_seconds) + "s";
+            return '<button type="button" class="session-chip" data-host-id="' + escapeHtml(item.host_id || "default") + '">'
+              + escapeHtml(item.host_id || "default") + ' · ' + escapeHtml(age)
+              + '</button>';
+          }).join(" ");
+          Array.from(node.querySelectorAll(".session-chip")).forEach(function(button) {
+            button.addEventListener("click", function() {
+              const hostId = button.getAttribute("data-host-id") || "default";
+              const input = document.getElementById("live-host-id");
+              if (input) {
+                input.value = hostId;
+                try {
+                  window.localStorage.setItem("ai_live_host_id", hostId);
+                } catch (error) {}
+              }
+              simulateLiveMetrics();
+            });
+          });
+        } catch (error) {
+          node.textContent = "无法读取活跃房间";
+        }
+      }
 
       function randomBetween(min, max) {
         return Math.random() * (max - min) + min;
@@ -1299,6 +1393,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           const normalizedText = normalizeTaobaoPayload(textareaValue);
           const raw = JSON.parse(normalizedText);
           const payload = normalizeAssistantPayload(raw);
+          payload.host_id = payload.host_id || payload.room_id || payload.liveId || liveHostId();
           console.log("raw payload", raw);
           console.log("normalized payload", payload);
           console.log("online_uv", payload && payload.online_uv);
@@ -1314,8 +1409,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const payAmt = document.getElementById("debug-pay-amt");
         const sourceNode = document.getElementById("debug-live-source");
         const lastUpdated = document.getElementById("debug-last-updated");
+        const hostNode = document.getElementById("debug-host-id");
         if (!onlineUv || !heatScore || !payAmt || !sourceNode || !lastUpdated) {
           return;
+        }
+        if (hostNode) {
+          hostNode.textContent = (metrics && (metrics.host_id || metrics.liveId || metrics.live_id)) || liveHostId();
         }
         onlineUv.textContent = metrics ? Math.round(toNumber(metrics.online_uv)).toLocaleString() : "--";
         heatScore.textContent = metrics ? String(toNumber(metrics.heat_score_raw)) : "--";
@@ -1446,6 +1545,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return {};
         }
         const payload = realPayload;
+        payload.host_id = payload.host_id || payload.room_id || payload.liveId || liveHostId();
         const commentsInput = document.getElementById("live-comments-input");
         if (commentsInput && commentsInput.value.trim()) {
           payload.viewer_comments = commentsInput.value;
@@ -1458,6 +1558,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            host_id: liveHostId(),
             payload: currentInputPayload(),
             products: liveProducts
           })
@@ -1533,6 +1634,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           item_add_cart_rate: itemAddCartRate,
           item_gmv: itemGmv,
           jiangJieEffect: jiangJieEffect,
+          host_id: data.host_id || data.room_id || data.liveId || liveHostId(),
           inventory: toNumber(data.inventory),
           profit_margin: normalizeRate(data.profit_margin),
           authenticity_questions: toNumber(data.authenticity_questions || data.auth_questions),
@@ -1895,6 +1997,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           item_add_cart_rate: normalizeRate(snapshot.item_add_cart_rate),
           item_gmv: toNumber(snapshot.item_gmv),
           jiangJieEffect: 0,
+          host_id: snapshot.host_id || liveHostId(),
           authenticity_questions: toNumber(snapshot.authenticity_comments),
           sizing_questions: toNumber(snapshot.sizing_comments),
           source: snapshot.source || "real_api"
@@ -2055,6 +2158,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function renderConnectorDecision(data) {
         const metrics = metricsFromConnector(data.snapshot);
+        metrics.host_id = data.host_id || metrics.host_id || liveHostId();
         metrics.missing_metrics = data.missing_metrics || [];
         metrics.last_updated = data.snapshot ? data.snapshot.timestamp : 0;
         const decisionName = normalizeDecisionName(data.current_action);
@@ -2082,11 +2186,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           noValidMetrics
             ? "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
             : data.source === "real_api"
-            ? "Using real live metrics API · updates every 5s"
+            ? "Using real live metrics API · " + metrics.host_id + " · updates every 5s"
             : data.source === "chrome_extension"
-            ? "Using Chrome Extension Taobao live connector · updates every 5s"
+            ? "Using Chrome Extension Taobao live connector · " + metrics.host_id + " · updates every 5s"
             : data.source === "page_payload"
-            ? "Using pasted/manual live payload via connector · updates every 5s"
+            ? "Using pasted/manual live payload via connector · " + metrics.host_id + " · updates every 5s"
             : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
         );
         document.getElementById("viewer-count").textContent = totalViewerText(metrics);
@@ -2363,9 +2467,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       bindLivePayloadInput();
+      bindLiveHostInput();
+      refreshActiveLiveSessions();
       simulateLiveMetrics();
       updateLiveCommentAssistant();
       window.setInterval(simulateLiveMetrics, 5000);
+      window.setInterval(refreshActiveLiveSessions, 10000);
       window.setInterval(updateLiveCommentAssistant, 5000);
     </script>"""
     return script.replace("__LIVE_PRODUCTS__", json.dumps(live_products, ensure_ascii=False))

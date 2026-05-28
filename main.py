@@ -130,8 +130,16 @@ async def live_decision(request: Request) -> dict[str, Any]:
     decision = live_data_connector.get_decision(
         payload=body.get("payload"),
         products=body.get("products"),
+        host_id=body.get("host_id") or body.get("hostId") or body.get("liveId"),
     )
     return asdict(decision)
+
+
+@app.get("/api/live/sessions")
+async def live_sessions(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return {"sessions": live_data_connector.active_sessions()}
 
 
 @app.post("/live-metrics")
@@ -149,6 +157,7 @@ async def live_metrics(request: Request) -> dict[str, Any]:
         "valid_live_metrics": decision.valid_live_metrics,
         "current_action": decision.current_action,
         "livestream_mode": decision.livestream_mode,
+        "host_id": decision.host_id,
         "snapshot_count": len(live_data_connector.snapshots),
     }
 
@@ -168,6 +177,7 @@ async def live_ingest(request: Request) -> dict[str, Any]:
         "valid_live_metrics": decision.valid_live_metrics,
         "current_action": decision.current_action,
         "livestream_mode": decision.livestream_mode,
+        "host_id": decision.host_id,
         "snapshot_count": len(live_data_connector.snapshots),
         "last_updated": decision.snapshot.timestamp,
     }
