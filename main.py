@@ -222,6 +222,21 @@ async def live_history(request: Request, host_id: str = "default") -> dict[str, 
     return live_data_connector.session_history(host_id)
 
 
+@app.post("/api/live/session-meta")
+async def live_session_meta(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    host_id = body.get("host_id") or body.get("hostId") or "default"
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else body
+    return live_data_connector.update_session_metadata(str(host_id), metadata)
+
+
 @app.post("/live-metrics")
 async def live_metrics(request: Request) -> dict[str, Any]:
     try:
@@ -656,6 +671,13 @@ def _render_live_console() -> str:
     .check { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfb; font-weight: 800; }
     .check i { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; background: #e5e7eb; color: var(--muted); font-style: normal; font-size: 12px; }
     .check.done i { background: #d1fae5; color: var(--accent); }
+    .timer { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fbfdfb; margin-top: 14px; }
+    .timer b { display: block; font-size: 36px; color: var(--accent); }
+    .timer.warn b { color: var(--warn); }
+    .timer.danger b { color: var(--danger); }
+    .product-cards { display: grid; gap: 8px; margin-top: 10px; }
+    .product-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
+    .product-card b { display: block; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
   </style>
 </head>
@@ -687,6 +709,11 @@ def _render_live_console() -> str:
           <div class="card"><span class="label">CVR</span><b id="cvr">--</b></div>
           <div class="card"><span class="label">停留</span><b id="watch-time">--</b></div>
         </section>
+        <section class="timer" id="product-timer">
+          <span class="label">当前商品讲解时长</span>
+          <b id="product-elapsed">00:00</b>
+          <div class="small" id="product-timer-hint">切换商品后自动重新计时。</div>
+        </section>
       </div>
       <div class="side">
         <section class="panel">
@@ -694,6 +721,13 @@ def _render_live_console() -> str:
           <div class="host-input"><input id="host-id-input" placeholder="default 或 liveId"><button id="save-host">连接</button></div>
           <div class="rooms" id="active-rooms"></div>
           <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
+        </section>
+        <section class="panel">
+          <span class="label">场次备注</span>
+          <input id="session-name" placeholder="场次名，例如：5月28晚场">
+          <input id="host-name" placeholder="主播，例如：Gigi" style="margin-top:8px;">
+          <input id="target-gmv" placeholder="目标 GMV，例如：50000" style="margin-top:8px;">
+          <button id="save-session-meta" type="button" style="margin-top:8px;">保存场次信息</button>
         </section>
         <section class="panel">
           <span class="label">开播前 Checklist</span>
@@ -707,8 +741,9 @@ def _render_live_console() -> str:
         </section>
         <section class="panel">
           <span class="label">推荐商品队列</span>
-          <textarea class="comments" id="product-list" placeholder="粘贴今天要讲的商品，每行一个&#10;Kragg Shirt&#10;Atom Jacket&#10;Gamma Pant"></textarea>
+          <textarea class="comments" id="product-list" placeholder="每行一个商品；可用 | 分隔价格和卖点&#10;Kragg Shirt | ¥499 | 特价T恤，适合通勤&#10;Atom Jacket | ¥1709 | 日常保暖"></textarea>
           <div class="small">会参与“推荐下一件”决策，保存在本机浏览器。</div>
+          <div class="product-cards" id="product-cards"></div>
           <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div>
         </section>
         <section class="panel">
@@ -724,12 +759,33 @@ def _render_live_console() -> str:
     let products = [];
     let liveMode = localStorage.getItem("ai_live_mode") || "real";
     let demoTick = 0;
+    let currentProductName = "";
+    let currentProductStartedAt = Date.now();
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
     function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
     function hostId() { const input = document.getElementById("host-id-input"); return (input && input.value.trim()) || localStorage.getItem("ai_live_host_id") || "default"; }
-    function setHostId(value) { const next = value || "default"; document.getElementById("host-id-input").value = next; document.getElementById("host-id-label").textContent = next; localStorage.setItem("ai_live_host_id", next); }
+    function setHostId(value) { const next = value || "default"; document.getElementById("host-id-input").value = next; document.getElementById("host-id-label").textContent = next; localStorage.setItem("ai_live_host_id", next); bindSessionMeta(); }
+    function metaKey(key) { return "ai_live_" + hostId() + "_" + key; }
+    function bindSessionMeta() {
+      document.getElementById("session-name").value = localStorage.getItem(metaKey("session_name")) || "";
+      document.getElementById("host-name").value = localStorage.getItem(metaKey("host_name")) || "";
+      document.getElementById("target-gmv").value = localStorage.getItem(metaKey("target_gmv")) || "";
+    }
+    async function saveSessionMeta() {
+      const metadata = {
+        session_name: document.getElementById("session-name").value.trim(),
+        host_name: document.getElementById("host-name").value.trim(),
+        target_gmv: document.getElementById("target-gmv").value.trim()
+      };
+      Object.keys(metadata).forEach((key) => localStorage.setItem(metaKey(key), metadata[key]));
+      await fetch("/api/live/session-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host_id: hostId(), metadata })
+      }).catch(() => {});
+    }
     function setMode(mode) {
       liveMode = mode === "demo" ? "demo" : "real";
       localStorage.setItem("ai_live_mode", liveMode);
@@ -745,19 +801,37 @@ def _render_live_console() -> str:
       input.addEventListener("input", () => {
         localStorage.setItem("ai_live_products", input.value);
         products = productsFromInput();
+        renderProductCards();
         refreshDecision();
         updateChecklist();
       });
       products = productsFromInput();
+      renderProductCards();
     }
     function productsFromInput() {
       const input = document.getElementById("product-list");
-      return (input.value || "").split("\\n").map((line, index) => line.trim()).filter(Boolean).slice(0, 50).map((name, index) => ({
-        name,
+      return (input.value || "").split("\\n").map((line) => line.trim()).filter(Boolean).slice(0, 50).map((line, index) => {
+        const parts = line.split("|").map((part) => part.trim());
+        const name = parts[0] || line;
+        return {
+          name,
+          price: parts[1] || "",
+          note: parts[2] || "",
+          raw: line,
         score: 1 - index * 0.01,
         inventory: 1,
         profit_margin: 0
-      }));
+        };
+      });
+    }
+    function renderProductCards() {
+      const node = document.getElementById("product-cards");
+      const list = productsFromInput().slice(0, 8);
+      if (!list.length) {
+        node.innerHTML = '<div class="small">等待商品队列...</div>';
+        return;
+      }
+      node.innerHTML = list.map((product, index) => '<div class="product-card"><b>' + (index + 1) + '. ' + escapeHtml(product.name) + '</b><div class="small">' + escapeHtml([product.price, product.note].filter(Boolean).join(" · ") || "未填写价格/卖点") + '</div></div>').join("");
     }
     function normalizeAction(action) {
       const text = String(action || "");
@@ -873,9 +947,31 @@ def _render_live_console() -> str:
       document.getElementById("connection-status").textContent = data.valid_live_metrics ? "真实数据已连接" : "等待有效直播数据";
       if (data.source === "demo") document.getElementById("connection-status").textContent = "演示模式运行中";
       document.getElementById("last-updated").textContent = snapshot.timestamp ? "Last updated: " + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "Last updated: --";
+      updateProductTimer((snapshot.current_product || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品"));
       renderTimeline(data.timeline || []);
       renderQueue(data);
       updateChecklist();
+    }
+    function updateProductTimer(productName) {
+      if (productName !== currentProductName) {
+        currentProductName = productName;
+        currentProductStartedAt = Date.now();
+      }
+      renderProductTimer();
+    }
+    function renderProductTimer() {
+      const elapsed = Math.max(0, Math.floor((Date.now() - currentProductStartedAt) / 1000));
+      const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      const seconds = String(elapsed % 60).padStart(2, "0");
+      const panel = document.getElementById("product-timer");
+      document.getElementById("product-elapsed").textContent = minutes + ":" + seconds;
+      panel.classList.toggle("warn", elapsed >= 90 && elapsed < 150);
+      panel.classList.toggle("danger", elapsed >= 150);
+      document.getElementById("product-timer-hint").textContent = elapsed >= 150
+        ? "已超过 150 秒，强烈建议切品或换话题。"
+        : elapsed >= 90
+        ? "已超过 90 秒，准备收口并切下一件。"
+        : "讲解节奏正常。";
     }
     function renderTimeline(items) {
       const node = document.getElementById("timeline");
@@ -919,7 +1015,8 @@ def _render_live_console() -> str:
     }
     document.getElementById("mode-real").addEventListener("click", () => setMode("real"));
     document.getElementById("mode-demo").addEventListener("click", () => setMode("demo"));
-    document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
+    document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); saveSessionMeta(); refreshDecision(); });
+    document.getElementById("save-session-meta").addEventListener("click", () => { saveSessionMeta(); });
     document.getElementById("comments").addEventListener("input", () => { renderComments(); refreshDecision(); });
     setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     bindProductList();
@@ -928,6 +1025,7 @@ def _render_live_console() -> str:
     window.setInterval(refreshSessions, 10000);
     window.setInterval(refreshDecision, 5000);
     window.setInterval(renderComments, 5000);
+    window.setInterval(renderProductTimer, 1000);
   </script>
 </body>
 </html>"""
@@ -1092,7 +1190,7 @@ def _render_admin_live() -> str:
           ["Live ID", session.live_id || "--"]
         ].map((item) => '<div class="metric"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
         return '<article class="room">'
-          + '<div class="room-head"><div><h2>' + escapeHtml(session.host_id || "default") + '</h2><div class="small">Last updated: ' + ageText(session.age_seconds) + ' ago</div></div>' + statusPill(session) + '</div>'
+          + '<div class="room-head"><div><h2>' + escapeHtml(session.display_name || session.host_id || "default") + '</h2><div class="small">Host ID: ' + escapeHtml(session.host_id || "default") + ' · Last updated: ' + ageText(session.age_seconds) + ' ago</div></div>' + statusPill(session) + '</div>'
           + '<div class="metrics">' + metrics + '</div>'
           + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a><a class="button" href="' + detailUrl + '">查看趋势/导出</a></div>'
           + '</article>';
@@ -1199,6 +1297,7 @@ def _render_admin_live_detail(host_id: str) -> str:
       const snapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
       const summary = data.summary || {{}};
       const latest = snapshots[snapshots.length - 1] || {{}};
+      document.querySelector("h1").textContent = summary.display_name || "直播间趋势";
       document.getElementById("online-uv").textContent = fmtNumber(latest.online_uv || summary.online_uv);
       document.getElementById("total-viewers").textContent = fmtNumber(latest.total_viewers || summary.total_viewers);
       document.getElementById("pay-amt").textContent = fmtMoney(latest.pay_amt || summary.pay_amt);

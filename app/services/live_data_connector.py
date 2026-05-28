@@ -109,6 +109,7 @@ class LiveSessionState:
     latest_ingested_at: float = 0.0
     snapshots: list[LiveMetricSnapshot] = field(default_factory=list)
     action_history: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class LiveDataConnector:
@@ -161,8 +162,11 @@ class LiveDataConnector:
         for host_id, session in self.sessions.items():
             latest_snapshot = session.snapshots[-1] if session.snapshots else None
             latest_action = session.action_history[-1] if session.action_history else {}
+            display_name = _session_display_name(host_id, session.metadata)
             rows.append({
                 "host_id": host_id,
+                "display_name": display_name,
+                "metadata": dict(session.metadata),
                 "live_id": _pick(session.latest_ingested_payload or {}, "liveId", "live_id", "room_id") or host_id,
                 "last_updated": session.latest_ingested_at or (latest_snapshot.timestamp if latest_snapshot else 0),
                 "age_seconds": round(now - (session.latest_ingested_at or 0), 1) if session.latest_ingested_at else None,
@@ -200,9 +204,21 @@ class LiveDataConnector:
         return {
             "host_id": clean_host_id,
             "summary": summary,
+            "metadata": dict(session.metadata),
             "snapshots": [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
             "actions": list(reversed(session.action_history[-20:])),
         }
+
+    def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
+        clean_host_id = _clean_host_id(host_id)
+        session = self._session(clean_host_id)
+        allowed_keys = {"session_name", "host_name", "owner", "target_gmv", "notes"}
+        for key in allowed_keys:
+            value = metadata.get(key)
+            if value is None:
+                continue
+            session.metadata[key] = str(value).strip()[:160]
+        return {"host_id": clean_host_id, "metadata": dict(session.metadata)}
 
     def _session(self, host_id: str) -> LiveSessionState:
         if host_id not in self.sessions:
@@ -647,6 +663,15 @@ def _snapshot_summary(snapshot: LiveMetricSnapshot) -> dict[str, Any]:
         "item_gmv": snapshot.item_gmv,
         "product_level_connected": snapshot.product_level_connected,
     }
+
+
+def _session_display_name(host_id: str, metadata: dict[str, Any]) -> str:
+    parts = [
+        str(metadata.get("host_name") or "").strip(),
+        str(metadata.get("session_name") or "").strip(),
+    ]
+    text = "｜".join(part for part in parts if part)
+    return text or host_id
 
 
 def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
