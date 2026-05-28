@@ -9,6 +9,9 @@
     "http://localhost:8000/api/live-ingest",
     "http://127.0.0.1:8000/api/live-ingest"
   ];
+  const EXTENSION_VERSION = chrome.runtime && chrome.runtime.getManifest
+    ? chrome.runtime.getManifest().version
+    : "unknown";
   function now() {
     return Date.now();
   }
@@ -68,8 +71,10 @@
 
     if (event.data.type !== "AI_LIVE_DIRECTOR_METRICS") return;
     const payload = event.data.payload || {};
+    payload.extension_version = payload.extension_version || EXTENSION_VERSION;
     updateStatus({
       lastPayloadReadyAt: now(),
+      extensionVersion: EXTENSION_VERSION,
       hostId: payload.host_id || payload.liveId || "",
       liveId: payload.liveId || "",
       metricKeys: Object.keys(payload.metrics || {}),

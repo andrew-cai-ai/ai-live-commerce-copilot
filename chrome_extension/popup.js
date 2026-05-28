@@ -38,6 +38,7 @@ function render(status) {
   setText("last-sent", timeText(status.lastSentAt));
   setText("host-id", status.hostId || status.liveId || "--");
   setText("live-id", status.liveId || "--");
+  setText("extension-version", status.extensionVersion || "--");
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");

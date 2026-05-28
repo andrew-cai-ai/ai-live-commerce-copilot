@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.1")
+
 
 @dataclass
 class ProductOption:
@@ -171,6 +173,12 @@ class LiveDataConnector:
                 "last_updated": session.latest_ingested_at or (latest_snapshot.timestamp if latest_snapshot else 0),
                 "age_seconds": round(now - (session.latest_ingested_at or 0), 1) if session.latest_ingested_at else None,
                 "source": _pick(session.latest_ingested_payload or {}, "source") or (latest_snapshot.source if latest_snapshot else ""),
+                "extension_version": _pick(session.latest_ingested_payload or {}, "extension_version", "extensionVersion") or "",
+                "latest_extension_version": LATEST_EXTENSION_VERSION,
+                "extension_update_available": _version_lt(
+                    str(_pick(session.latest_ingested_payload or {}, "extension_version", "extensionVersion") or ""),
+                    LATEST_EXTENSION_VERSION,
+                ),
                 "valid_live_metrics": _has_valid_live_metrics(latest_snapshot) if latest_snapshot else False,
                 "current_action": latest_action.get("decision", ""),
                 "current_product": latest_snapshot.current_product if latest_snapshot else "",
@@ -184,7 +192,7 @@ class LiveDataConnector:
                 "product_level_connected": _has_product_level_metrics(latest_snapshot) if latest_snapshot else False,
                 "metric_keys": sorted(
                     key for key, value in (session.latest_ingested_payload or {}).items()
-                    if key not in {"source", "liveId", "live_id", "host_id", "room_id", "timestamp", "captured_api", "interactSecKill"}
+                    if key not in {"source", "liveId", "live_id", "host_id", "room_id", "timestamp", "captured_api", "extension_version", "interactSecKill"}
                     and value is not None
                 ),
             })
@@ -757,6 +765,17 @@ def _time_label(timestamp: Any) -> str:
         return "--"
 
 
+def _version_lt(current: str, latest: str) -> bool:
+    if not current or current == "unknown" or current == "page_hook":
+        return True
+    return _version_tuple(current) < _version_tuple(latest)
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    numbers = re.findall(r"\d+", str(value or ""))
+    return tuple(int(number) for number in numbers[:4]) or (0,)
+
+
 def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
@@ -770,7 +789,7 @@ def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     events = payload.get("events")
     if isinstance(events, list):
         normalized["interactSecKill"] = events
-    for key in ("source", "liveId", "live_id", "host_id", "hostId", "room_id", "roomId", "timestamp", "captured_at", "captured_api"):
+    for key in ("source", "liveId", "live_id", "host_id", "hostId", "room_id", "roomId", "timestamp", "captured_at", "captured_api", "extension_version", "extensionVersion"):
         if payload.get(key) is not None:
             normalized[key] = payload[key]
     normalized["source"] = payload.get("source") or "chrome_extension"

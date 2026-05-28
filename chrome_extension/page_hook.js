@@ -245,6 +245,7 @@
 
     return {
       source: "chrome_extension",
+      extension_version: "page_hook",
       host_id: hostIdFromLiveId(liveId),
       room_id: liveId,
       liveId,
@@ -260,6 +261,7 @@
     const currentMetrics = current.metrics || {};
     return {
       source: "chrome_extension",
+      extension_version: current.extension_version || previous.extension_version || "page_hook",
       host_id: current.host_id || previous.host_id || hostIdFromLiveId(current.liveId || previous.liveId),
       room_id: current.room_id || previous.room_id || current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       liveId: current.liveId || previous.liveId || DEFAULT_LIVE_ID,

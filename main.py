@@ -1069,7 +1069,7 @@ def _render_install_guide() -> str:
   <main>
     <div class="hero">
       <h1>Chrome 插件安装教程</h1>
-      <p>给主播电脑安装一次即可。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化。</p>
+      <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.1</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化。</p>
       <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
       <p><a href="/live">打开主播控制台</a> · <a href="/">返回首页</a></p>
     </div>
@@ -1195,6 +1195,7 @@ def _render_admin_live() -> str:
           ["最新动作", session.current_action || "--"],
           ["快照数", fmtNumber(session.snapshot_count)],
           ["商品级数据", session.product_level_connected ? "已连接" : "未连接"],
+          ["插件版本", (session.extension_version || "--") + (session.extension_update_available ? " · 需更新" : "")],
           ["来源", session.source || "--"],
           ["Live ID", session.live_id || "--"]
         ].map((item) => '<div class="metric"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
