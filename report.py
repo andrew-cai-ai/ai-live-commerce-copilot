@@ -1174,6 +1174,16 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         throw new Error("Unsupported Taobao payload format");
       }
 
+      const encodedValueTypeMap = {
+        look_uv_td_d_live: "look_uv_td_d_live",
+        look_uv_5min_d_live: "look_uv_5min_d_live",
+        look_time_td_avg_d_live: "look_time_td_avg_d_live",
+        pay_amt_td_d_live: "pay_amt_td_d_live",
+        pay_amt_5min_d_live: "pay_amt_5min_d_live",
+        pay_amt_td_d_shop: "pay_amt_td_d_shop",
+        pay_amt_5min_d_shop: "pay_amt_5min_d_shop"
+      };
+
       const encodedMetricMap = [
         { field: "look_uv_td_d_live", terms: ["look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"] },
         { field: "online_uv", terms: ["online_uv", "onlineuv", "当前在线", "当前在线人数", "实时在线", "在线人数", "在线观众"] },
@@ -1200,7 +1210,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
               if (!parsed) {
                 return;
               }
-              const field = metricFieldFromLabel(parsed.label);
+              const field = metricFieldFromValueType(parsed.valueType) || metricFieldFromLabel(parsed.label);
               if (field && metrics[field] === undefined) {
                 metrics[field] = parsed.numericValue;
               }
@@ -1266,6 +1276,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           }
         }
         return "";
+      }
+
+      function metricFieldFromValueType(valueType) {
+        return encodedValueTypeMap[String(valueType || "").trim()] || "";
       }
 
       function readAssistantPayload() {
@@ -1562,7 +1576,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function calculateDecision(metrics, trends) {
         if (metrics.missing_metrics && metrics.missing_metrics.length) {
-          return "数据不完整，等待 totalStats 或实时插件补齐。";
+          return "数据不完整，等待 totalStats / 插件补齐";
         }
         const clickRate = metrics.item_click_rate || metrics.ipv_uv_rate || 0;
         const conversionRate = metrics.item_conversion_rate || metrics.pay_byr_rate || 0;
@@ -1669,11 +1683,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function buildDecisionReasons(metrics, trends) {
         const decision = calculateDecision(metrics, trends);
-        if (decision === "数据不完整，等待 totalStats 或实时插件补齐。") {
+        if (decision === "数据不完整，等待 totalStats / 插件补齐") {
           return {
             decision: decision,
             reasons: (metrics.missing_metrics || []).slice(0, 3).map(function(item) { return "missing: " + item; }),
-            sentence: "先别根据这组数据切品，等 totalStats 或实时插件把指标补齐。",
+            sentence: "先别根据这组数据切品，等 totalStats / 插件补齐。",
             action: "等待完整数据"
           };
         }
@@ -1730,7 +1744,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (decision === "No valid live metrics detected") {
           return "action-topic";
         }
-        if (decision === "数据不完整，等待 totalStats 或实时插件补齐。") {
+        if (decision === "数据不完整，等待 totalStats / 插件补齐") {
           return "action-topic";
         }
         if (decision === "Switch product") {
@@ -2019,7 +2033,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
         if (text.includes("no valid live metrics")) { return "No valid live metrics detected"; }
-        if (text.includes("数据不完整")) { return "数据不完整，等待 totalStats 或实时插件补齐。"; }
+        if (text.includes("数据不完整")) { return "数据不完整，等待 totalStats / 插件补齐"; }
         if (text.includes("switch")) { return "Switch product"; }
         if (text.includes("value")) { return "Explain value/price"; }
         if (text.includes("authenticity")) { return "Show authenticity"; }

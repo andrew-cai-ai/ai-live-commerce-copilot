@@ -180,13 +180,16 @@ def score_products(
         )
         raw_rows.append((item, cost_cny, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap))
 
-    max_stock = max((row[0].stock or row[0].sku_count for row in raw_rows), default=0)
+    max_stock = max(
+        (row[0].stock or row[0].sku_count for row in raw_rows if not row[0].inventory_unknown),
+        default=0,
+    )
 
     scored: list[ScoredProduct] = []
     for item, cost_cny, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap in raw_rows:
         price_gap_score = market_research.price_gap_score
         inventory_units = item.stock or item.sku_count
-        inventory_priority = inventory_units / max_stock if max_stock else 0
+        inventory_priority = 0.5 if item.inventory_unknown else inventory_units / max_stock if max_stock else 0
         popularity_score = market_research.popularity_score or knowledge.popularity_score
         sellability = calculate_sellability_score(item.product_name, target_selling_price, popularity_score)
         competition_score = _competition_score(market_research.avg_market_price, target_selling_price)

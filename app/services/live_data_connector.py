@@ -54,7 +54,15 @@ class LiveMetricSnapshot:
     look_uv_5min_d_live: float = 0.0
     look_time_5min_avg_d_live: float = 0.0
     pay_amt_5min_d_live: float = 0.0
+    pay_amt_td_d_shop: float = 0.0
     pay_amt_5min_d_shop: float = 0.0
+    total_live_viewers: float = 0.0
+    recent_5min_viewers: float = 0.0
+    avg_watch_duration: float = 0.0
+    live_pay_amt: float = 0.0
+    live_pay_amt_5min: float = 0.0
+    shop_pay_amt: float = 0.0
+    shop_pay_amt_5min: float = 0.0
     item_click_rate: float = 0.0
     item_conversion_rate: float = 0.0
     item_add_cart_rate: float = 0.0
@@ -188,6 +196,13 @@ class LiveDataConnector:
                 "jiangJieEffect",
             )
         )
+        look_uv_td_d_live = _to_number(_pick(data_region, "look_uv_td_d_live") or _pick(data, "look_uv_td_d_live"))
+        look_uv_5min_d_live = _to_number(_pick(data_region, "look_uv_5min_d_live") or _pick(data, "look_uv_5min_d_live"))
+        look_time_td_avg_d_live = _to_number(_pick(data_region, "look_time_td_avg_d_live") or _pick(data, "look_time_td_avg_d_live"))
+        pay_amt_td_d_live = _to_number(_pick(data_region, "pay_amt_td_d_live") or _pick(data, "pay_amt_td_d_live"))
+        pay_amt_5min_d_live = _to_number(_pick(data_region, "pay_amt_5min_d_live") or _pick(data, "pay_amt_5min_d_live"))
+        pay_amt_td_d_shop = _to_number(_pick(data_region, "pay_amt_td_d_shop") or _pick(data, "pay_amt_td_d_shop"))
+        pay_amt_5min_d_shop = _to_number(_pick(data_region, "pay_amt_5min_d_shop") or _pick(data, "pay_amt_5min_d_shop"))
         return LiveMetricSnapshot(
             timestamp=time.time(),
             online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv")),
@@ -203,13 +218,21 @@ class LiveDataConnector:
             refund_amt=_to_number(_pick(total_stats, "refund_amt", "refundAmt")),
             comment_uv=_to_number(_pick(total_stats, "comment_uv", "commentUv")),
             atn_uv=_to_number(_pick(total_stats, "atn_uv", "atnUv")),
-            look_uv_td_d_live=_to_number(_pick(data_region, "look_uv_td_d_live") or _pick(data, "look_uv_td_d_live")),
-            look_time_td_avg_d_live=_to_number(_pick(data_region, "look_time_td_avg_d_live")),
-            pay_amt_td_d_live=_to_number(_pick(data_region, "pay_amt_td_d_live")),
-            look_uv_5min_d_live=_to_number(_pick(data_region, "look_uv_5min_d_live") or _pick(data, "look_uv_5min_d_live")),
+            look_uv_td_d_live=look_uv_td_d_live,
+            look_time_td_avg_d_live=look_time_td_avg_d_live,
+            pay_amt_td_d_live=pay_amt_td_d_live,
+            look_uv_5min_d_live=look_uv_5min_d_live,
             look_time_5min_avg_d_live=_to_number(_pick(data_region, "look_time_5min_avg_d_live")),
-            pay_amt_5min_d_live=_to_number(_pick(data_region, "pay_amt_5min_d_live")),
-            pay_amt_5min_d_shop=_to_number(_pick(data_region, "pay_amt_5min_d_shop")),
+            pay_amt_5min_d_live=pay_amt_5min_d_live,
+            pay_amt_td_d_shop=pay_amt_td_d_shop,
+            pay_amt_5min_d_shop=pay_amt_5min_d_shop,
+            total_live_viewers=look_uv_td_d_live,
+            recent_5min_viewers=look_uv_5min_d_live,
+            avg_watch_duration=look_time_td_avg_d_live,
+            live_pay_amt=pay_amt_td_d_live,
+            live_pay_amt_5min=pay_amt_5min_d_live,
+            shop_pay_amt=pay_amt_td_d_shop,
+            shop_pay_amt_5min=pay_amt_5min_d_shop,
             item_click_rate=_normalize_rate(_pick(data, "item_click_rate", "itemClickRate") or ipv_uv_rate),
             item_conversion_rate=_normalize_rate(_pick(data, "item_conversion_rate", "itemConversionRate") or pay_byr_rate),
             item_add_cart_rate=_normalize_rate(_pick(data, "item_add_cart_rate", "itemAddCartRate", "cart_rate")),
@@ -269,8 +292,8 @@ class LiveDataConnector:
         learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
         if missing_metrics:
-            current_action = "数据不完整，等待 totalStats 或实时插件补齐。"
-            next_action = "先观察，不要根据缺失指标切品，等待 totalStats 或实时插件补齐。"
+            current_action = "数据不完整，等待 totalStats / 插件补齐"
+            next_action = "先观察，不要根据缺失指标切品，等待 totalStats / 插件补齐。"
             reason = [f"missing: {metric}" for metric in missing_metrics[:3]]
             confidence = 0.0
             livestream_mode = "Waiting for complete live metrics"
@@ -485,6 +508,8 @@ _DATA_REGION_REQUIRED = (
     "look_uv_5min_d_live",
     "pay_amt_td_d_live",
     "pay_amt_5min_d_live",
+    "pay_amt_td_d_shop",
+    "pay_amt_5min_d_shop",
 )
 
 
@@ -511,6 +536,16 @@ def _camelize(value: str) -> str:
     head, *tail = value.split("_")
     return head + "".join(part[:1].upper() + part[1:] for part in tail)
 
+
+_ENCODED_VALUE_TYPE_MAP: dict[str, str] = {
+    "look_uv_td_d_live": "look_uv_td_d_live",
+    "look_uv_5min_d_live": "look_uv_5min_d_live",
+    "look_time_td_avg_d_live": "look_time_td_avg_d_live",
+    "pay_amt_td_d_live": "pay_amt_td_d_live",
+    "pay_amt_5min_d_live": "pay_amt_5min_d_live",
+    "pay_amt_td_d_shop": "pay_amt_td_d_shop",
+    "pay_amt_5min_d_shop": "pay_amt_5min_d_shop",
+}
 
 _ENCODED_METRIC_TERMS: dict[str, tuple[str, ...]] = {
     "look_uv_td_d_live": ("look_uv_td_d_live", "lookuvtddlive", "累计观看人数", "总观看人数", "观看人数", "看播人数", "look_uv_td"),
@@ -540,7 +575,7 @@ def _extract_taobao_encoded_metrics(payload: Any) -> dict[str, float]:
                 parsed = _parse_encoded_metric_row(row)
                 if not parsed:
                     continue
-                field = _metric_field_from_label(parsed["label"])
+                field = _metric_field_from_value_type(parsed["value_type"]) or _metric_field_from_label(parsed["label"])
                 if field and field not in metrics:
                     metrics[field] = parsed["numeric_value"]
     return metrics
@@ -590,6 +625,10 @@ def _metric_field_from_label(label: str) -> str:
         if any(re.sub(r"[\s_\-]+", "", term.lower()) in normalized for term in terms):
             return field
     return ""
+
+
+def _metric_field_from_value_type(value_type: str) -> str:
+    return _ENCODED_VALUE_TYPE_MAP.get(str(value_type or "").strip())
 
 
 def _pick(data: dict[str, Any], *keys: str) -> Any:

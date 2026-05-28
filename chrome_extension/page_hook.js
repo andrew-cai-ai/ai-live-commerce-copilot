@@ -126,6 +126,7 @@
         look_uv_5min_d_live: toNumber(pick(dataRegion, "look_uv_5min_d_live")),
         look_time_5min_avg_d_live: toNumber(pick(dataRegion, "look_time_5min_avg_d_live")),
         pay_amt_5min_d_live: toNumber(pick(dataRegion, "pay_amt_5min_d_live")),
+        pay_amt_td_d_shop: toNumber(pick(dataRegion, "pay_amt_td_d_shop")),
         pay_amt_5min_d_shop: toNumber(pick(dataRegion, "pay_amt_5min_d_shop"))
       } : {},
       interactSecKill: parseProductEvents(findValue(data, "interactSecKill"))
