@@ -207,6 +207,11 @@ class LiveDataConnector:
             "metadata": dict(session.metadata),
             "snapshots": [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
             "actions": list(reversed(session.action_history[-20:])),
+            "post_live_summary": _post_live_summary(
+                [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
+                list(reversed(session.action_history[-20:])),
+                session.metadata,
+            ),
         }
 
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -672,6 +677,84 @@ def _session_display_name(host_id: str, metadata: dict[str, Any]) -> str:
     ]
     text = "｜".join(part for part in parts if part)
     return text or host_id
+
+
+def _post_live_summary(
+    snapshots: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    if not snapshots:
+        return {
+            "status": "waiting",
+            "headline": "暂无可复盘数据",
+            "highlights": [],
+            "risks": ["等待插件发送直播数据。"],
+            "next_suggestions": ["先确认插件连接，再开始记录本场数据。"],
+            "best_moment": "--",
+            "weak_moment": "--",
+        }
+
+    first = snapshots[0]
+    last = snapshots[-1]
+    max_pay = max(snapshots, key=lambda item: float(item.get("pay_amt") or 0))
+    max_heat = max(snapshots, key=lambda item: float(item.get("heat_score") or 0))
+    max_ctr = max(snapshots, key=lambda item: float(item.get("ipv_uv_rate") or 0))
+    pay_delta = float(last.get("pay_amt") or 0) - float(first.get("pay_amt") or 0)
+    viewer_delta = float(last.get("total_viewers") or 0) - float(first.get("total_viewers") or 0)
+    avg_cvr = sum(float(item.get("pay_byr_rate") or 0) for item in snapshots) / max(len(snapshots), 1)
+    avg_ctr = sum(float(item.get("ipv_uv_rate") or 0) for item in snapshots) / max(len(snapshots), 1)
+    action_counts: dict[str, int] = {}
+    for action in actions:
+        key = str(action.get("decision") or "unknown")
+        action_counts[key] = action_counts.get(key, 0) + 1
+    top_action = max(action_counts.items(), key=lambda item: item[1])[0] if action_counts else "--"
+
+    highlights = [
+        f"本段 GMV 增量约 ¥{pay_delta:,.0f}。",
+        f"最高热度 {float(max_heat.get('heat_score') or 0):,.0f}，出现在 { _time_label(max_heat.get('timestamp')) }。",
+        f"最高 CTR {float(max_ctr.get('ipv_uv_rate') or 0) * 100:.1f}%。",
+    ]
+    risks: list[str] = []
+    if avg_ctr >= 0.08 and avg_cvr < 0.02:
+        risks.append("点击不错但成交偏弱，下场要更早解释价格价值。")
+    if avg_ctr < 0.04:
+        risks.append("整体点击偏低，商品开场钩子和镜头展示需要更直接。")
+    if pay_delta <= 0:
+        risks.append("本段没有明显成交增长，建议缩短单品讲解并更快切换。")
+    if viewer_delta < 0:
+        risks.append("观看人数走低，出现疲劳时要更早换款或做互动。")
+    if not risks:
+        risks.append("整体数据健康，继续保持当前节奏。")
+
+    next_suggestions = [
+        "高 CTR 低 CVR 时，先讲价格价值，不要立刻换款。",
+        "单品超过 90 秒仍无成交，准备收口切下一件。",
+        "尺码/真假评论集中出现时，优先回答阻碍成交的问题。",
+    ]
+    if metadata.get("target_gmv"):
+        next_suggestions.insert(0, f"围绕目标 GMV {metadata.get('target_gmv')}，优先保留成交效率高的款。")
+
+    return {
+        "status": "ready",
+        "headline": f"本段累计 {len(snapshots)} 个快照，GMV 增量约 ¥{pay_delta:,.0f}",
+        "highlights": highlights,
+        "risks": risks,
+        "next_suggestions": next_suggestions,
+        "best_moment": f"{_time_label(max_pay.get('timestamp'))} · GMV ¥{float(max_pay.get('pay_amt') or 0):,.0f}",
+        "weak_moment": f"常见动作：{top_action}",
+        "avg_ctr": avg_ctr,
+        "avg_cvr": avg_cvr,
+        "pay_delta": pay_delta,
+        "viewer_delta": viewer_delta,
+    }
+
+
+def _time_label(timestamp: Any) -> str:
+    try:
+        return time.strftime("%H:%M:%S", time.localtime(float(timestamp)))
+    except Exception:
+        return "--"
 
 
 def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:

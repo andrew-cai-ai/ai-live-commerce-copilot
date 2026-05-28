@@ -146,6 +146,9 @@ def export_live_history(request: Request, host_id: str) -> Response:
     fieldnames = [
         "timestamp",
         "host_id",
+        "session_name",
+        "host_name",
+        "target_gmv",
         "current_product",
         "online_uv",
         "total_viewers",
@@ -165,8 +168,14 @@ def export_live_history(request: Request, host_id: str) -> Response:
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
+    metadata = history.get("metadata") or {}
     for row in rows:
-        writer.writerow({key: row.get(key, "") for key in fieldnames})
+        writer.writerow({
+            **{key: row.get(key, "") for key in fieldnames},
+            "session_name": metadata.get("session_name", ""),
+            "host_name": metadata.get("host_name", ""),
+            "target_gmv": metadata.get("target_gmv", ""),
+        })
     return Response(
         content=output.getvalue(),
         media_type="text/csv; charset=utf-8",
@@ -1238,8 +1247,12 @@ def _render_admin_live_detail(host_id: str) -> str:
     .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }}
     .timeline {{ display: grid; gap: 8px; }}
     .timeline-item {{ border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px; background: #fbfdfb; }}
+    .summary-list {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
+    .summary-box {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }}
+    .summary-box h3 {{ margin: 0 0 8px; font-size: 14px; color: var(--accent); }}
+    .summary-box ul {{ margin: 0; padding-left: 18px; }}
     .small {{ color: var(--muted); font-size: 13px; }}
-    @media (max-width: 900px) {{ .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} header {{ display: block; }} }}
+    @media (max-width: 900px) {{ .grid, .summary-list {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} header {{ display: block; }} }}
   </style>
 </head>
 <body>
@@ -1268,6 +1281,16 @@ def _render_admin_live_detail(host_id: str) -> str:
       </div>
       <div class="chart" id="chart"></div>
       <div class="small" id="chart-label" style="margin-top:8px;">最近快照趋势</div>
+    </section>
+    <section class="panel">
+      <h2>自动复盘摘要</h2>
+      <div id="post-live-headline" style="font-size:22px;font-weight:950;color:var(--accent);">等待数据...</div>
+      <div class="summary-list" style="margin-top:12px;">
+        <div class="summary-box"><h3>亮点</h3><ul id="summary-highlights"><li>等待数据...</li></ul></div>
+        <div class="summary-box"><h3>风险</h3><ul id="summary-risks"><li>等待数据...</li></ul></div>
+        <div class="summary-box"><h3>下场建议</h3><ul id="summary-suggestions"><li>等待数据...</li></ul></div>
+      </div>
+      <div class="small" style="margin-top:10px;">最佳时刻：<b id="summary-best">--</b> · 观察点：<b id="summary-weak">--</b></div>
     </section>
     <section class="panel">
       <h2>AI 动作时间线</h2>
@@ -1304,6 +1327,7 @@ def _render_admin_live_detail(host_id: str) -> str:
       document.getElementById("heat-score").textContent = fmtNumber(latest.heat_score || summary.heat_score);
       document.getElementById("current-action").textContent = summary.current_action || "--";
       renderChart(snapshots);
+      renderSummary(data.post_live_summary || {{}});
       renderTimeline(data.actions || []);
       renderRows(snapshots.slice(-40).reverse());
     }}
@@ -1322,6 +1346,18 @@ def _render_admin_live_detail(host_id: str) -> str:
       const node = document.getElementById("timeline");
       if (!actions.length) {{ node.innerHTML = '<div class="timeline-item">等待动作...</div>'; return; }}
       node.innerHTML = actions.slice(0, 10).map((item) => '<div class="timeline-item"><b>' + timeText(item.timestamp) + ' · ' + escapeHtml(item.decision || "--") + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(item.next_action || "--") + '</div></div>').join("");
+    }}
+    function renderSummary(summary) {{
+      document.getElementById("post-live-headline").textContent = summary.headline || "暂无可复盘数据";
+      document.getElementById("summary-best").textContent = summary.best_moment || "--";
+      document.getElementById("summary-weak").textContent = summary.weak_moment || "--";
+      renderList("summary-highlights", summary.highlights || []);
+      renderList("summary-risks", summary.risks || []);
+      renderList("summary-suggestions", summary.next_suggestions || []);
+    }}
+    function renderList(id, items) {{
+      const node = document.getElementById(id);
+      node.innerHTML = (items.length ? items : ["等待数据..."]).map((item) => '<li>' + escapeHtml(item) + '</li>').join("");
     }}
     function renderRows(rows) {{
       const node = document.getElementById("snapshot-rows");
