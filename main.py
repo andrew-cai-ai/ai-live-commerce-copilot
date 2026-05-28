@@ -113,6 +113,13 @@ def live_console(request: Request) -> str:
     return _render_live_console()
 
 
+@app.get("/install", response_class=HTMLResponse)
+def install_guide(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_install_guide()
+
+
 @app.post("/login")
 def login(password: str = Form("")):
     if not password_matches(password):
@@ -456,7 +463,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/live">打开主播控制台</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/live">打开主播控制台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -581,6 +588,13 @@ def _render_live_console() -> str:
     .comments { min-height: 90px; }
     .reply { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
     .small { color: var(--muted); font-size: 13px; }
+    .mode-toggle { display: inline-flex; gap: 6px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; background: #fff; margin-right: 10px; }
+    .mode-toggle button { border-radius: 999px; padding: 7px 10px; background: transparent; color: var(--muted); }
+    .mode-toggle button.active { background: var(--accent); color: #fff; }
+    .checklist { display: grid; gap: 8px; }
+    .check { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfb; font-weight: 800; }
+    .check i { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; background: #e5e7eb; color: var(--muted); font-style: normal; font-size: 12px; }
+    .check.done i { background: #d1fae5; color: var(--accent); }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
   </style>
 </head>
@@ -588,7 +602,10 @@ def _render_live_console() -> str:
   <main>
     <header>
       <div><h1>主播实时控制台</h1><div class="small">只看未来 10-30 秒该做什么</div></div>
-      <div><span class="status" id="connection-status">等待插件数据...</span><a href="/" style="margin-left:12px;">返回选品</a></div>
+      <div>
+        <span class="mode-toggle"><button id="mode-real" type="button" class="active">真实</button><button id="mode-demo" type="button">演示</button></span>
+        <span class="status" id="connection-status">等待插件数据...</span><a href="/" style="margin-left:12px;">返回选品</a>
+      </div>
     </header>
     <section class="layout">
       <div>
@@ -618,6 +635,16 @@ def _render_live_console() -> str:
           <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
         </section>
         <section class="panel">
+          <span class="label">开播前 Checklist</span>
+          <div class="checklist">
+            <div class="check" id="check-mode"><i>1</i><span>选择真实/演示模式</span></div>
+            <div class="check" id="check-connector"><i>2</i><span>插件或演示数据已连接</span></div>
+            <div class="check" id="check-products"><i>3</i><span>商品队列已填写</span></div>
+            <div class="check" id="check-comments"><i>4</i><span>评论助手可用</span></div>
+            <div class="check" id="check-action"><i>5</i><span>已生成下一步动作</span></div>
+          </div>
+        </section>
+        <section class="panel">
           <span class="label">推荐商品队列</span>
           <textarea class="comments" id="product-list" placeholder="粘贴今天要讲的商品，每行一个&#10;Kragg Shirt&#10;Atom Jacket&#10;Gamma Pant"></textarea>
           <div class="small">会参与“推荐下一件”决策，保存在本机浏览器。</div>
@@ -634,12 +661,23 @@ def _render_live_console() -> str:
   </main>
   <script>
     let products = [];
+    let liveMode = localStorage.getItem("ai_live_mode") || "real";
+    let demoTick = 0;
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
     function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
     function hostId() { const input = document.getElementById("host-id-input"); return (input && input.value.trim()) || localStorage.getItem("ai_live_host_id") || "default"; }
     function setHostId(value) { const next = value || "default"; document.getElementById("host-id-input").value = next; document.getElementById("host-id-label").textContent = next; localStorage.setItem("ai_live_host_id", next); }
+    function setMode(mode) {
+      liveMode = mode === "demo" ? "demo" : "real";
+      localStorage.setItem("ai_live_mode", liveMode);
+      document.getElementById("mode-real").classList.toggle("active", liveMode === "real");
+      document.getElementById("mode-demo").classList.toggle("active", liveMode === "demo");
+      document.getElementById("connection-status").textContent = liveMode === "demo" ? "演示模式运行中" : "等待插件数据...";
+      refreshDecision();
+      updateChecklist();
+    }
     function bindProductList() {
       const input = document.getElementById("product-list");
       input.value = localStorage.getItem("ai_live_products") || "";
@@ -647,6 +685,7 @@ def _render_live_console() -> str:
         localStorage.setItem("ai_live_products", input.value);
         products = productsFromInput();
         refreshDecision();
+        updateChecklist();
       });
       products = productsFromInput();
     }
@@ -682,6 +721,10 @@ def _render_live_console() -> str:
     }
     async function refreshSessions() {
       const node = document.getElementById("active-rooms");
+      if (liveMode === "demo") {
+        node.innerHTML = '<span class="small">演示模式不需要插件</span>';
+        return;
+      }
       try {
         const response = await fetch("/api/live/sessions");
         const data = await response.json();
@@ -694,6 +737,11 @@ def _render_live_console() -> str:
       } catch (error) { node.innerHTML = '<span class="small">读取活跃房间失败</span>'; }
     }
     async function refreshDecision() {
+      if (liveMode === "demo") {
+        renderDecision(buildDemoDecision());
+        updateChecklist();
+        return;
+      }
       const comments = document.getElementById("comments").value || "";
       const response = await fetch("/api/live/decision", {
         method: "POST",
@@ -709,6 +757,43 @@ def _render_live_console() -> str:
       });
       const data = await response.json();
       if (!data.error) renderDecision(data);
+      updateChecklist();
+    }
+    function buildDemoDecision() {
+      demoTick += 1;
+      const productList = productsFromInput();
+      const current = (productList[demoTick % Math.max(productList.length, 1)] || {}).name || "演示商品";
+      const actions = ["continue product", "push harder", "explain value", "switch to sizing explanation", "show authenticity proof"];
+      const action = actions[demoTick % actions.length];
+      const payAmt = 8800 + demoTick * 320;
+      return {
+        valid_live_metrics: true,
+        current_action: action,
+        next_action: nextSentence(action, ""),
+        recommended_next_product: (productList[(demoTick + 1) % Math.max(productList.length, 1)] || {}).name || "下一件演示商品",
+        reason: ["demo data", "CTR up", "comments active"],
+        host_id: "demo-room",
+        source: "demo",
+        snapshot: {
+          timestamp: Date.now() / 1000,
+          current_product: current,
+          total_live_viewers: 1200 + demoTick * 35,
+          uv: 1200 + demoTick * 35,
+          online_uv: 86 + (demoTick % 7) * 5,
+          pay_amt: payAmt,
+          heat_score: 620 + (demoTick % 5) * 24,
+          ipv_uv_rate: 0.08 + (demoTick % 4) * 0.01,
+          pay_byr_rate: 0.018 + (demoTick % 3) * 0.006,
+          stay_time_pu: 42 + (demoTick % 6) * 8
+        },
+        timeline: [{
+          timestamp: Date.now() / 1000,
+          decision: action,
+          reason: ["演示模式", "用于培训和试播"],
+          next_action: nextSentence(action, ""),
+          event_type: action.includes("switch") ? "danger" : action.includes("explain") || action.includes("authenticity") ? "warning" : "positive"
+        }]
+      };
     }
     function renderDecision(data) {
       const snapshot = data.snapshot || {};
@@ -725,9 +810,11 @@ def _render_live_console() -> str:
       document.getElementById("cvr").textContent = fmtPercent(snapshot.pay_byr_rate);
       document.getElementById("watch-time").textContent = snapshot.stay_time_pu ? Math.round(snapshot.stay_time_pu) + "s" : "--";
       document.getElementById("connection-status").textContent = data.valid_live_metrics ? "真实数据已连接" : "等待有效直播数据";
+      if (data.source === "demo") document.getElementById("connection-status").textContent = "演示模式运行中";
       document.getElementById("last-updated").textContent = snapshot.timestamp ? "Last updated: " + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "Last updated: --";
       renderTimeline(data.timeline || []);
       renderQueue(data);
+      updateChecklist();
     }
     function renderTimeline(items) {
       const node = document.getElementById("timeline");
@@ -756,16 +843,78 @@ def _render_live_console() -> str:
       const node = document.getElementById("comment-replies");
       const comments = input.value.split("\\n").map((line) => line.trim()).filter(Boolean).slice(0, 6);
       node.innerHTML = comments.map((comment) => '<div class="reply"><b>' + escapeHtml(comment) + '</b><div>' + escapeHtml(answerComment(comment)) + '</div></div>').join("");
+      updateChecklist();
     }
+    function setCheck(id, done) {
+      const node = document.getElementById(id);
+      if (node) node.classList.toggle("done", !!done);
+    }
+    function updateChecklist() {
+      setCheck("check-mode", liveMode === "real" || liveMode === "demo");
+      setCheck("check-connector", liveMode === "demo" || document.getElementById("connection-status").textContent.includes("真实数据"));
+      setCheck("check-products", productsFromInput().length > 0);
+      setCheck("check-comments", true);
+      setCheck("check-action", document.getElementById("current-action").textContent !== "等待数据");
+    }
+    document.getElementById("mode-real").addEventListener("click", () => setMode("real"));
+    document.getElementById("mode-demo").addEventListener("click", () => setMode("demo"));
     document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
     document.getElementById("comments").addEventListener("input", () => { renderComments(); refreshDecision(); });
     setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     bindProductList();
+    setMode(liveMode);
     refreshSessions(); refreshDecision();
     window.setInterval(refreshSessions, 10000);
     window.setInterval(refreshDecision, 5000);
     window.setInterval(renderComments, 5000);
   </script>
+</body>
+</html>"""
+
+
+def _render_install_guide() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chrome 插件安装教程</title>
+  <style>
+    :root { color-scheme: light; --ink: #16211f; --muted: #5b6764; --line: #d6dfdb; --paper: #f7f9f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { margin: 0 0 8px; font-size: 34px; }
+    p { color: var(--muted); line-height: 1.6; }
+    a { color: var(--accent); font-weight: 900; text-decoration: none; }
+    .hero { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px; margin-bottom: 16px; }
+    .download { display: inline-block; margin-top: 10px; background: var(--accent); color: #fff; border-radius: 8px; padding: 12px 16px; }
+    .steps { display: grid; gap: 12px; counter-reset: step; }
+    .step { counter-increment: step; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+    .step:before { content: counter(step); width: 38px; height: 38px; border-radius: 999px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 950; }
+    .step h2 { margin: 0 0 4px; font-size: 18px; }
+    code { background: #edf4f1; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+    .note { margin-top: 16px; padding: 14px; border-radius: 8px; border: 1px solid rgba(12, 107, 88, .22); background: rgba(12, 107, 88, .08); color: var(--accent); font-weight: 800; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="hero">
+      <h1>Chrome 插件安装教程</h1>
+      <p>给主播电脑安装一次即可。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化。</p>
+      <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
+      <p><a href="/live">打开主播控制台</a> · <a href="/">返回首页</a></p>
+    </div>
+    <div class="steps">
+      <section class="step"><div><h2>下载并解压插件包</h2><p>点击上方下载，得到 zip 文件后先解压成文件夹。不要直接选择 zip。</p></div></section>
+      <section class="step"><div><h2>打开 Chrome 扩展程序页面</h2><p>在 Chrome 地址栏输入 <code>chrome://extensions</code>，右上角打开 Developer Mode / 开发者模式。</p></div></section>
+      <section class="step"><div><h2>加载插件文件夹</h2><p>点击 <code>Load unpacked</code> / 加载已解压的扩展程序，选择刚才解压出来的插件文件夹。</p></div></section>
+      <section class="step"><div><h2>打开淘宝直播中控</h2><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code> 的实时直播中控页面。</p></div></section>
+      <section class="step"><div><h2>点击插件并检查 4 步状态</h2><p>插件弹窗里看到“捕获实时接口”和“发送到云端系统”完成后，回到主播控制台。</p></div></section>
+      <section class="step"><div><h2>进入主播控制台</h2><p>打开 <a href="/live">/live</a>。如果只有一个活跃直播间，系统会自动连接；多人同时直播时，选择对应 Host / room ID。</p></div></section>
+    </div>
+    <div class="note">如果没有正在直播，插件可能抓不到目标接口。这不是报错，可以先在 /live 使用“演示模式”培训主播。</div>
+  </main>
 </body>
 </html>"""
 
@@ -823,7 +972,7 @@ def _inject_report_history_banner(report_html: str, report_id: str) -> str:
     <section class="order-panel">
       <h2>报告已保存</h2>
       <p>报告 ID：{html.escape(report_id)}</p>
-      <p><a href="/live">打开主播控制台</a> · <a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+      <p><a href="/live">打开主播控制台</a> · <a href="/install">插件安装教程</a> · <a href="/reports/{html.escape(report_id)}">查看保存版本</a> · <a href="/reports/{html.escape(report_id)}/export">下载 HTML</a> · <a href="/reports">历史报告</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     </section>"""
     return report_html.replace("<main>", f"<main>{banner}", 1)
 
