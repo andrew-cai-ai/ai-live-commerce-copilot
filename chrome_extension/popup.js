@@ -1,5 +1,6 @@
 const STATUS_KEY = "aiLiveDirectorStatus";
 let manualInjectOverride = null;
+let memoryStatus = {};
 
 document.addEventListener("DOMContentLoaded", () => {
   setText("popup-js", "loaded", "good");
@@ -70,10 +71,20 @@ function render(status) {
 }
 
 function updateStatus(patch, callback) {
+  memoryStatus = { ...memoryStatus, ...patch, updatedAt: Date.now() };
+  if (!hasChromeStorage()) {
+    if (callback) callback();
+    return;
+  }
   chrome.storage.local.get([STATUS_KEY], (result) => {
     const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
-    chrome.storage.local.set({ [STATUS_KEY]: { ...current, ...patch, updatedAt: Date.now() } }, callback);
+    const next = { ...current, ...memoryStatus };
+    chrome.storage.local.set({ [STATUS_KEY]: next }, callback);
   });
+}
+
+function hasChromeStorage() {
+  return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
 }
 
 function activeTabMatches(url) {
@@ -92,6 +103,10 @@ function inspectActiveTab() {
 }
 
 function inspectActiveTabDirect(errorMessage) {
+  if (!chrome.tabs || !chrome.tabs.query) {
+    updateStatus({ lastError: "chrome.tabs API is unavailable. Check extension permissions." }, refresh);
+    return;
+  }
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs && tabs[0] ? tabs[0] : {};
     let host = "";
@@ -204,14 +219,24 @@ function injectCurrentTabDirect(reason) {
 }
 
 function refresh() {
+  if (!hasChromeStorage()) {
+    render(memoryStatus);
+    return;
+  }
   chrome.storage.local.get([STATUS_KEY], (result) => {
-    render(result && result[STATUS_KEY] ? result[STATUS_KEY] : {});
+    memoryStatus = { ...memoryStatus, ...((result && result[STATUS_KEY]) || {}) };
+    render(memoryStatus);
   });
 }
 
 document.getElementById("inject-now").addEventListener("click", injectCurrentTab);
 
 document.getElementById("clear-status").addEventListener("click", () => {
+  memoryStatus = {};
+  if (!hasChromeStorage()) {
+    refresh();
+    return;
+  }
   chrome.storage.local.remove([STATUS_KEY], refresh);
 });
 

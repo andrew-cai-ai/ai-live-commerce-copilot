@@ -12,6 +12,10 @@ function activeTabMatches(url) {
 }
 
 function statusPatch(patch, callback) {
+  if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) {
+    if (callback) callback();
+    return;
+  }
   chrome.storage.local.get([STATUS_KEY], (result) => {
     const current = result && result[STATUS_KEY] ? result[STATUS_KEY] : {};
     chrome.storage.local.set({

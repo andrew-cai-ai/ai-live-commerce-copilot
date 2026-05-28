@@ -20,7 +20,7 @@
       updatedAt: now(),
       pageUrl: location.href
     };
-    if (!chrome.storage || !chrome.storage.local) {
+    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) {
       return;
     }
     chrome.storage.local.get([STATUS_KEY], (result) => {
