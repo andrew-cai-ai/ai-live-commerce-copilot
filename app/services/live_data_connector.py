@@ -186,6 +186,24 @@ class LiveDataConnector:
             })
         return sorted(rows, key=lambda item: item.get("last_updated") or 0, reverse=True)
 
+    def session_history(self, host_id: str) -> dict[str, Any]:
+        clean_host_id = _clean_host_id(host_id)
+        session = self.sessions.get(clean_host_id)
+        if session is None:
+            return {
+                "host_id": clean_host_id,
+                "summary": None,
+                "snapshots": [],
+                "actions": [],
+            }
+        summary = next((item for item in self.active_sessions() if item.get("host_id") == clean_host_id), None)
+        return {
+            "host_id": clean_host_id,
+            "summary": summary,
+            "snapshots": [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
+            "actions": list(reversed(session.action_history[-20:])),
+        }
+
     def _session(self, host_id: str) -> LiveSessionState:
         if host_id not in self.sessions:
             self.sessions[host_id] = LiveSessionState()
@@ -603,6 +621,32 @@ def _clean_host_id(value: Any) -> str:
         return "default"
     text = re.sub(r"[^A-Za-z0-9_.:-]+", "-", text)
     return text[:80] or "default"
+
+
+def _snapshot_summary(snapshot: LiveMetricSnapshot) -> dict[str, Any]:
+    return {
+        "timestamp": snapshot.timestamp,
+        "host_id": snapshot.host_id,
+        "source": snapshot.source,
+        "current_product": snapshot.current_product,
+        "online_uv": snapshot.online_uv,
+        "total_viewers": snapshot.total_live_viewers or snapshot.uv,
+        "uv": snapshot.uv,
+        "pv": snapshot.pv,
+        "heat_score": snapshot.heat_score,
+        "pay_amt": snapshot.pay_amt,
+        "pay_byr_rate": snapshot.pay_byr_rate,
+        "ipv_uv_rate": snapshot.ipv_uv_rate,
+        "stay_time_pu": snapshot.stay_time_pu,
+        "comment_uv": snapshot.comment_uv,
+        "pay_item_qty": snapshot.pay_item_qty,
+        "pay_buyer_cnt": snapshot.pay_buyer_cnt,
+        "item_click_rate": snapshot.item_click_rate,
+        "item_conversion_rate": snapshot.item_conversion_rate,
+        "item_add_cart_rate": snapshot.item_add_cart_rate,
+        "item_gmv": snapshot.item_gmv,
+        "product_level_connected": snapshot.product_level_connected,
+    }
 
 
 def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:

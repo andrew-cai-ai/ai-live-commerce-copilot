@@ -3,6 +3,8 @@ from __future__ import annotations
 import html
 import io
 import time
+import csv
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -127,6 +129,51 @@ def admin_live(request: Request) -> str:
     return _render_admin_live()
 
 
+@app.get("/admin/live/{host_id}", response_class=HTMLResponse)
+def admin_live_detail(request: Request, host_id: str) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_admin_live_detail(host_id)
+
+
+@app.get("/admin/live/{host_id}/export.csv")
+def export_live_history(request: Request, host_id: str) -> Response:
+    if not is_authenticated(request):
+        return RedirectResponse("/", status_code=303)
+    history = live_data_connector.session_history(host_id)
+    rows = history.get("snapshots") or []
+    output = io.StringIO()
+    fieldnames = [
+        "timestamp",
+        "host_id",
+        "current_product",
+        "online_uv",
+        "total_viewers",
+        "heat_score",
+        "pay_amt",
+        "ipv_uv_rate",
+        "pay_byr_rate",
+        "stay_time_pu",
+        "comment_uv",
+        "pay_item_qty",
+        "pay_buyer_cnt",
+        "item_click_rate",
+        "item_conversion_rate",
+        "item_add_cart_rate",
+        "item_gmv",
+        "source",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: row.get(key, "") for key in fieldnames})
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="live-history-{html.escape(host_id)}.csv"'},
+    )
+
+
 @app.post("/login")
 def login(password: str = Form("")):
     if not password_matches(password):
@@ -166,6 +213,13 @@ async def live_sessions(request: Request) -> dict[str, Any]:
     if not is_authenticated(request):
         return {"error": "unauthorized"}
     return {"sessions": live_data_connector.active_sessions()}
+
+
+@app.get("/api/live/history")
+async def live_history(request: Request, host_id: str = "default") -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_data_connector.session_history(host_id)
 
 
 @app.post("/live-metrics")
@@ -1020,7 +1074,9 @@ def _render_admin_live() -> str:
         return;
       }
       node.innerHTML = sessions.slice(0, 20).map((session) => {
-        const liveUrl = "/live?host_id=" + encodeURIComponent(session.host_id || "default");
+        const hostId = session.host_id || "default";
+        const liveUrl = "/live?host_id=" + encodeURIComponent(hostId);
+        const detailUrl = "/admin/live/" + encodeURIComponent(hostId);
         const metrics = [
           ["总观看", fmtNumber(session.total_viewers)],
           ["在线", fmtNumber(session.online_uv)],
@@ -1038,10 +1094,149 @@ def _render_admin_live() -> str:
         return '<article class="room">'
           + '<div class="room-head"><div><h2>' + escapeHtml(session.host_id || "default") + '</h2><div class="small">Last updated: ' + ageText(session.age_seconds) + ' ago</div></div>' + statusPill(session) + '</div>'
           + '<div class="metrics">' + metrics + '</div>'
-          + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a></div>'
+          + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a><a class="button" href="' + detailUrl + '">查看趋势/导出</a></div>'
           + '</article>';
       }).join("");
     }
+    refresh();
+    window.setInterval(refresh, 5000);
+  </script>
+</body>
+</html>"""
+
+
+def _render_admin_live_detail(host_id: str) -> str:
+    safe_host_id = html.escape(host_id)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>直播间趋势 - {safe_host_id}</title>
+  <style>
+    :root {{ color-scheme: light; --ink: #16211f; --muted: #5b6764; --line: #d6dfdb; --paper: #f7f9f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; --warn: #a16207; --danger: #b42318; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 28px 18px 56px; }}
+    header {{ display: flex; justify-content: space-between; gap: 18px; align-items: flex-end; margin-bottom: 18px; }}
+    h1 {{ margin: 0; font-size: 30px; }}
+    a {{ color: var(--accent); font-weight: 900; text-decoration: none; }}
+    .grid {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }}
+    .card, .panel {{ background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }}
+    .card span {{ display: block; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 0; }}
+    .card b {{ display: block; font-size: 24px; margin-top: 4px; overflow-wrap: anywhere; }}
+    .panel {{ margin-top: 14px; }}
+    .chart {{ display: grid; grid-template-columns: repeat(60, minmax(3px, 1fr)); gap: 3px; align-items: end; min-height: 170px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfb; }}
+    .bar {{ min-height: 2px; background: var(--accent); border-radius: 4px 4px 0 0; }}
+    .bar.pay {{ background: #b7791f; }}
+    .bar.heat {{ background: #2563eb; }}
+    .chart-tabs {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }}
+    button, .button {{ border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 8px 10px; font-weight: 900; cursor: pointer; display: inline-flex; }}
+    button.secondary {{ background: #e7efeb; color: var(--accent); }}
+    button.active {{ background: var(--accent); color: #fff; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; min-width: 860px; }}
+    th, td {{ border-bottom: 1px solid var(--line); padding: 9px; text-align: left; font-size: 13px; }}
+    th {{ color: var(--muted); font-size: 12px; }}
+    .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }}
+    .timeline {{ display: grid; gap: 8px; }}
+    .timeline-item {{ border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px; background: #fbfdfb; }}
+    .small {{ color: var(--muted); font-size: 13px; }}
+    @media (max-width: 900px) {{ .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} header {{ display: block; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>直播间趋势</h1>
+        <div class="small">Host ID: <b id="host-id">{safe_host_id}</b></div>
+      </div>
+      <div><a href="/live?host_id={safe_host_id}">打开主播控制台</a> · <a href="/admin/live">返回监控后台</a> · <a href="/admin/live/{safe_host_id}/export.csv">导出 CSV</a></div>
+    </header>
+    <section class="grid">
+      <div class="card"><span>在线</span><b id="online-uv">--</b></div>
+      <div class="card"><span>总观看</span><b id="total-viewers">--</b></div>
+      <div class="card"><span>GMV</span><b id="pay-amt">--</b></div>
+      <div class="card"><span>热度</span><b id="heat-score">--</b></div>
+      <div class="card"><span>最新动作</span><b id="current-action">--</b></div>
+    </section>
+    <section class="panel">
+      <div class="chart-tabs">
+        <button class="active" data-chart="online_uv">在线</button>
+        <button class="secondary" data-chart="pay_amt">GMV</button>
+        <button class="secondary" data-chart="heat_score">热度</button>
+        <button class="secondary" data-chart="ipv_uv_rate">CTR</button>
+        <button class="secondary" data-chart="pay_byr_rate">CVR</button>
+      </div>
+      <div class="chart" id="chart"></div>
+      <div class="small" id="chart-label" style="margin-top:8px;">最近快照趋势</div>
+    </section>
+    <section class="panel">
+      <h2>AI 动作时间线</h2>
+      <div class="timeline" id="timeline"><div class="timeline-item">等待动作...</div></div>
+    </section>
+    <section class="panel">
+      <h2>最近快照</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>商品</th><th>在线</th><th>总观看</th><th>GMV</th><th>热度</th><th>CTR</th><th>CVR</th><th>停留</th><th>评论</th></tr></thead>
+          <tbody id="snapshot-rows"><tr><td colspan="10">等待数据...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    const hostId = {json.dumps(host_id)};
+    let chartField = "online_uv";
+    function fmtNumber(value) {{ const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }}
+    function fmtMoney(value) {{ const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }}
+    function fmtPercent(value) {{ const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }}
+    function escapeHtml(value) {{ return String(value || "").replace(/[&<>"']/g, (char) => ({{ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }}[char])); }}
+    function timeText(ts) {{ return ts ? new Date(ts * 1000).toLocaleTimeString("zh-CN", {{ hour12: false }}) : "--"; }}
+    async function refresh() {{
+      const response = await fetch("/api/live/history?host_id=" + encodeURIComponent(hostId));
+      const data = await response.json();
+      const snapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
+      const summary = data.summary || {{}};
+      const latest = snapshots[snapshots.length - 1] || {{}};
+      document.getElementById("online-uv").textContent = fmtNumber(latest.online_uv || summary.online_uv);
+      document.getElementById("total-viewers").textContent = fmtNumber(latest.total_viewers || summary.total_viewers);
+      document.getElementById("pay-amt").textContent = fmtMoney(latest.pay_amt || summary.pay_amt);
+      document.getElementById("heat-score").textContent = fmtNumber(latest.heat_score || summary.heat_score);
+      document.getElementById("current-action").textContent = summary.current_action || "--";
+      renderChart(snapshots);
+      renderTimeline(data.actions || []);
+      renderRows(snapshots.slice(-40).reverse());
+    }}
+    function renderChart(snapshots) {{
+      const node = document.getElementById("chart");
+      const values = snapshots.slice(-60).map((item) => Number(item[chartField] || 0));
+      const maxValue = Math.max(...values, 1);
+      node.innerHTML = values.map((value) => {{
+        const height = Math.max(2, Math.round((value / maxValue) * 150));
+        const cls = chartField === "pay_amt" ? "bar pay" : chartField === "heat_score" ? "bar heat" : "bar";
+        return '<div class="' + cls + '" style="height:' + height + 'px" title="' + value + '"></div>';
+      }}).join("") || '<div class="small">暂无趋势数据</div>';
+      document.getElementById("chart-label").textContent = "当前指标: " + chartField + " · 快照数: " + snapshots.length;
+    }}
+    function renderTimeline(actions) {{
+      const node = document.getElementById("timeline");
+      if (!actions.length) {{ node.innerHTML = '<div class="timeline-item">等待动作...</div>'; return; }}
+      node.innerHTML = actions.slice(0, 10).map((item) => '<div class="timeline-item"><b>' + timeText(item.timestamp) + ' · ' + escapeHtml(item.decision || "--") + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(item.next_action || "--") + '</div></div>').join("");
+    }}
+    function renderRows(rows) {{
+      const node = document.getElementById("snapshot-rows");
+      if (!rows.length) {{ node.innerHTML = '<tr><td colspan="10">等待数据...</td></tr>'; return; }}
+      node.innerHTML = rows.map((row) => '<tr><td>' + timeText(row.timestamp) + '</td><td>' + escapeHtml(row.current_product || "--") + '</td><td>' + fmtNumber(row.online_uv) + '</td><td>' + fmtNumber(row.total_viewers) + '</td><td>' + fmtMoney(row.pay_amt) + '</td><td>' + fmtNumber(row.heat_score) + '</td><td>' + fmtPercent(row.ipv_uv_rate) + '</td><td>' + fmtPercent(row.pay_byr_rate) + '</td><td>' + (row.stay_time_pu ? Math.round(row.stay_time_pu) + "s" : "--") + '</td><td>' + fmtNumber(row.comment_uv) + '</td></tr>').join("");
+    }}
+    document.querySelectorAll("[data-chart]").forEach((button) => {{
+      button.addEventListener("click", () => {{
+        chartField = button.getAttribute("data-chart");
+        document.querySelectorAll("[data-chart]").forEach((item) => item.className = "secondary");
+        button.className = "active";
+        refresh();
+      }});
+    }});
     refresh();
     window.setInterval(refresh, 5000);
   </script>
