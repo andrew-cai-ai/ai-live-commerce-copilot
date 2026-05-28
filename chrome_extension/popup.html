@@ -14,6 +14,8 @@
       }
       body {
         width: 340px;
+        max-height: 580px;
+        overflow: auto;
         margin: 0;
         padding: 14px;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -71,11 +73,26 @@
         font-weight: 700;
         cursor: pointer;
       }
+      .top-action {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        margin: 0 0 10px;
+        box-shadow: 0 4px 10px rgba(17, 24, 39, 0.12);
+      }
+      .version {
+        margin: -4px 0 10px;
+        color: var(--muted);
+        font-size: 11px;
+      }
     </style>
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
+    <div class="version">Debug build: 2026-05-28-v4</div>
+    <button class="top-action" id="inject-now">手动注入当前页面</button>
     <div class="status">
+      <div class="row"><span>Popup JS</span><b id="popup-js">not loaded</b></div>
       <div class="row"><span>Content script</span><b id="content-script">no</b></div>
       <div class="row"><span>Page hook</span><b id="page-hook">no</b></div>
       <div class="row"><span>Target API captured</span><b id="captured-api">no</b></div>
@@ -92,7 +109,6 @@
       <div class="row"><span>Error</span><b id="error">--</b></div>
     </div>
     <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页，并确保本地 app 正在 http://localhost:8000 运行。</div>
-    <button id="inject-now">手动注入当前页面</button>
     <button id="clear-status">清空状态</button>
     <script src="popup.js"></script>
   </body>

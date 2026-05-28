@@ -1,5 +1,9 @@
 const STATUS_KEY = "aiLiveDirectorStatus";
 
+document.addEventListener("DOMContentLoaded", () => {
+  setText("popup-js", "loaded", "good");
+});
+
 function setText(id, text, className = "") {
   const node = document.getElementById(id);
   if (!node) return;
@@ -87,6 +91,7 @@ function inspectActiveTab() {
 }
 
 function injectCurrentTab() {
+  setText("manual-inject", "running", "warn");
   updateStatus({ manualInjectStatus: "running", lastError: "" }, refresh);
   chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INJECT_ACTIVE_TAB" }, (response) => {
     if (chrome.runtime.lastError) {
