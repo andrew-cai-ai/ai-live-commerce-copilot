@@ -1,9 +1,43 @@
 (() => {
   const TARGET_API = "mtop.taobao.tblive.portal.live.user.assistant.data.get";
   const SEND_INTERVAL_MS = 5000;
-  let latestMetrics = null;
-  let lastSentAt = 0;
+  const DEFAULT_LIVE_ID = "default_live";
   const metricsByLiveId = new Map();
+  let latestPayload = null;
+  let lastSentAt = 0;
+
+  const VALUE_TYPE_MAP = {
+    uv: "uv",
+    pv: "pv",
+    online_uv: "online_uv",
+    heat_score: "heat_score",
+    pay_amt: "pay_amt",
+    pay_byr_rate: "pay_byr_rate",
+    ipv_uv_rate: "ipv_uv_rate",
+    stay_time_pu: "stay_time_pu",
+    comment_uv: "comment_uv",
+    pay_item_qty: "pay_item_qty",
+    pay_buyer_cnt: "pay_buyer_cnt",
+    look_uv_td_d_live: "look_uv_td_d_live",
+    look_uv_5min_d_live: "look_uv_5min_d_live",
+    pay_amt_td_d_live: "pay_amt_td_d_live",
+    pay_amt_5min_d_live: "pay_amt_5min_d_live",
+    look_time_td_avg_d_live: "look_time_td_avg_d_live",
+    look_time_5min_avg_d_live: "look_time_5min_avg_d_live",
+    pay_amt_td_d_shop: "pay_amt_td_d_shop",
+    pay_amt_5min_d_shop: "pay_amt_5min_d_shop"
+  };
+
+  const DATA_REGION_FIELDS = new Set([
+    "look_uv_td_d_live",
+    "look_uv_5min_d_live",
+    "pay_amt_td_d_live",
+    "pay_amt_5min_d_live",
+    "look_time_td_avg_d_live",
+    "look_time_5min_avg_d_live",
+    "pay_amt_td_d_shop",
+    "pay_amt_5min_d_shop"
+  ]);
 
   function toNumber(value) {
     if (value === null || value === undefined || value === "") return 0;
@@ -19,6 +53,41 @@
     return Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
   }
 
+  function normalizeMetricValue(field, value) {
+    if (field === "pay_byr_rate" || field === "ipv_uv_rate") {
+      return normalizeRate(value);
+    }
+    return toNumber(value);
+  }
+
+  function safeDecode(value) {
+    try {
+      return decodeURIComponent(String(value));
+    } catch (_error) {
+      return String(value || "");
+    }
+  }
+
+  function normalizeTaobaoResponseText(input) {
+    const text = String(input || "").trim();
+    if (!text) return "";
+    if (text.startsWith("{") || text.startsWith("[")) return text;
+    const jsonp = text.match(/^[\w$]+\(([\s\S]*)\)\s*;?$/);
+    if (jsonp) return jsonp[1];
+    const objectMatch = text.match(/\{[\s\S]*\}/);
+    return objectMatch ? objectMatch[0] : "";
+  }
+
+  function parseJsonMaybe(text) {
+    const normalized = normalizeTaobaoResponseText(text);
+    if (!normalized) return null;
+    try {
+      return JSON.parse(normalized);
+    } catch (_error) {
+      return null;
+    }
+  }
+
   function findValue(node, key) {
     if (!node || typeof node !== "object") return undefined;
     if (Object.prototype.hasOwnProperty.call(node, key)) return node[key];
@@ -29,6 +98,11 @@
     return undefined;
   }
 
+  function findDict(node, key) {
+    const value = findValue(node, key);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  }
+
   function unwrapPayload(payload) {
     if (!payload || typeof payload !== "object") return {};
     if (payload.data && typeof payload.data === "object") {
@@ -37,30 +111,6 @@
       return payload.data;
     }
     return payload;
-  }
-
-  function liveIdFromPayload(payload, data) {
-    return String(
-      findValue(payload, "liveId")
-      || findValue(payload, "live_id")
-      || findValue(data, "liveId")
-      || findValue(data, "live_id")
-      || "default_live"
-    );
-  }
-
-  function parseJsonMaybe(text) {
-    try {
-      return JSON.parse(text);
-    } catch (_error) {
-      const match = String(text || "").match(/\{[\s\S]*\}/);
-      if (!match) return null;
-      try {
-        return JSON.parse(match[0]);
-      } catch (_innerError) {
-        return null;
-      }
-    }
   }
 
   function pick(source, ...keys) {
@@ -76,6 +126,47 @@
     return undefined;
   }
 
+  function collectDataLists(node, lists = []) {
+    if (!node || typeof node !== "object") return lists;
+    if (Array.isArray(node)) {
+      node.forEach((item) => collectDataLists(item, lists));
+      return lists;
+    }
+    if (Array.isArray(node.dataList)) {
+      lists.push(node.dataList);
+    }
+    Object.values(node).forEach((value) => collectDataLists(value, lists));
+    return lists;
+  }
+
+  function parseEncodedMetricRow(row) {
+    if (!row || typeof row !== "object") return null;
+    const rawValue = row.value || row.dataValue || row.metricValue || "";
+    if (!rawValue) return null;
+    const parts = safeDecode(rawValue).split(",");
+    const valueType = String(row.valueType || row.value_type || parts[1] || "").trim();
+    const field = VALUE_TYPE_MAP[valueType];
+    if (!field) return null;
+    const numericSource = parts[3] !== undefined ? parts[3] : parts[2];
+    return { field, value: normalizeMetricValue(field, numericSource) };
+  }
+
+  function extractEncodedMetrics(payload) {
+    const metrics = {};
+    for (const dataList of collectDataLists(payload)) {
+      for (const section of dataList) {
+        const rows = section && Array.isArray(section.data) ? section.data : [];
+        for (const row of rows) {
+          const parsed = parseEncodedMetricRow(row);
+          if (parsed && metrics[parsed.field] === undefined) {
+            metrics[parsed.field] = parsed.value;
+          }
+        }
+      }
+    }
+    return metrics;
+  }
+
   function parseProductEvents(raw) {
     const list = Array.isArray(raw)
       ? raw
@@ -84,74 +175,108 @@
       : [];
     if (!Array.isArray(list)) return [];
     return list.filter((item) => item && typeof item === "object").slice(0, 20).map((item) => ({
-      imageUrl: String(pick(item, "imageUrl", "image_url", "picUrl") || ""),
+      title: String(pick(item, "title", "itemTitle", "productTitle") || ""),
       price: toNumber(pick(item, "price")),
       payBuyerCnt: Math.round(toNumber(pick(item, "payBuyerCnt", "pay_buyer_cnt"))),
       startTime: String(pick(item, "startTime", "start_time") || ""),
       startTimeFormat: String(pick(item, "startTimeFormat", "start_time_format") || ""),
-      title: String(pick(item, "title", "itemTitle", "productTitle") || ""),
-      status: String(pick(item, "status") || "")
+      status: String(pick(item, "status") || ""),
+      imageUrl: String(pick(item, "imageUrl", "image_url", "picUrl") || "")
     }));
+  }
+
+  function liveIdFromPayload(rawPayload, data) {
+    return String(
+      findValue(rawPayload, "liveId")
+      || findValue(rawPayload, "live_id")
+      || findValue(data, "liveId")
+      || findValue(data, "live_id")
+      || DEFAULT_LIVE_ID
+    );
+  }
+
+  function assignKnownMetric(target, source, field, normalizer = toNumber) {
+    const value = pick(source, field);
+    if (value !== undefined) {
+      target[field] = normalizer(value);
+    }
   }
 
   function normalizeMtopPayload(rawPayload) {
     const data = unwrapPayload(rawPayload);
-    const foundTotalStats = findValue(data, "totalStats");
-    const totalStats = foundTotalStats || {};
-    const foundDataRegion = findValue(data, "dataRegion");
-    const dataRegion = foundDataRegion || {};
+    const totalStats = findDict(data, "totalStats");
+    const dataRegion = findDict(data, "dataRegion");
+    const encodedMetrics = extractEncodedMetrics(data);
     const liveId = liveIdFromPayload(rawPayload, data);
+    const metrics = {};
+
+    if (totalStats) {
+      assignKnownMetric(metrics, totalStats, "uv");
+      assignKnownMetric(metrics, totalStats, "pv");
+      assignKnownMetric(metrics, totalStats, "online_uv");
+      assignKnownMetric(metrics, totalStats, "heat_score");
+      assignKnownMetric(metrics, totalStats, "pay_amt");
+      assignKnownMetric(metrics, totalStats, "pay_byr_rate", normalizeRate);
+      assignKnownMetric(metrics, totalStats, "ipv_uv_rate", normalizeRate);
+      assignKnownMetric(metrics, totalStats, "stay_time_pu");
+      assignKnownMetric(metrics, totalStats, "comment_uv");
+      assignKnownMetric(metrics, totalStats, "pay_item_qty");
+      assignKnownMetric(metrics, totalStats, "pay_buyer_cnt");
+    }
+
+    if (dataRegion) {
+      metrics.dataRegion = {};
+      DATA_REGION_FIELDS.forEach((field) => assignKnownMetric(metrics.dataRegion, dataRegion, field));
+    }
+
+    Object.entries(encodedMetrics).forEach(([field, value]) => {
+      if (DATA_REGION_FIELDS.has(field)) {
+        metrics.dataRegion = metrics.dataRegion || {};
+        if (metrics.dataRegion[field] === undefined) metrics.dataRegion[field] = value;
+      } else if (metrics[field] === undefined) {
+        metrics[field] = value;
+      }
+    });
+
     return {
       source: "chrome_extension",
-      captured_api: TARGET_API,
-      captured_at: Date.now(),
       liveId,
-      online_uv: foundTotalStats ? toNumber(pick(totalStats, "online_uv", "onlineUv")) : undefined,
-      pv: foundTotalStats ? toNumber(pick(totalStats, "pv")) : undefined,
-      uv: foundTotalStats ? toNumber(pick(totalStats, "uv")) : undefined,
-      stay_time_pu: foundTotalStats ? toNumber(pick(totalStats, "stay_time_pu", "stayTimePu")) : undefined,
-      pay_byr_rate: foundTotalStats ? normalizeRate(pick(totalStats, "pay_byr_rate", "payByrRate")) : undefined,
-      pay_buyer_cnt: foundTotalStats ? toNumber(pick(totalStats, "pay_buyer_cnt", "payBuyerCnt")) : undefined,
-      pay_item_qty: foundTotalStats ? toNumber(pick(totalStats, "pay_item_qty", "payItemQty")) : undefined,
-      pay_amt: foundTotalStats ? toNumber(pick(totalStats, "pay_amt", "payAmt")) : undefined,
-      heat_score: foundTotalStats ? toNumber(pick(totalStats, "heat_score", "heatScore")) : undefined,
-      ipv_uv_rate: foundTotalStats ? normalizeRate(pick(totalStats, "ipv_uv_rate", "ipvUvRate")) : undefined,
-      comment_uv: foundTotalStats ? toNumber(pick(totalStats, "comment_uv", "commentUv")) : undefined,
-      refund_amt: foundTotalStats ? toNumber(pick(totalStats, "refund_amt", "refundAmt")) : undefined,
-      atn_uv: foundTotalStats ? toNumber(pick(totalStats, "atn_uv", "atnUv")) : undefined,
-      dataRegion: foundDataRegion ? {
-        look_uv_td_d_live: toNumber(pick(dataRegion, "look_uv_td_d_live")),
-        look_time_td_avg_d_live: toNumber(pick(dataRegion, "look_time_td_avg_d_live")),
-        pay_amt_td_d_live: toNumber(pick(dataRegion, "pay_amt_td_d_live")),
-        look_uv_5min_d_live: toNumber(pick(dataRegion, "look_uv_5min_d_live")),
-        look_time_5min_avg_d_live: toNumber(pick(dataRegion, "look_time_5min_avg_d_live")),
-        pay_amt_5min_d_live: toNumber(pick(dataRegion, "pay_amt_5min_d_live")),
-        pay_amt_td_d_shop: toNumber(pick(dataRegion, "pay_amt_td_d_shop")),
-        pay_amt_5min_d_shop: toNumber(pick(dataRegion, "pay_amt_5min_d_shop"))
-      } : {},
-      interactSecKill: parseProductEvents(findValue(data, "interactSecKill"))
+      timestamp: new Date().toISOString(),
+      captured_api: TARGET_API,
+      metrics,
+      events: parseProductEvents(findValue(data, "interactSecKill"))
+    };
+  }
+
+  function mergePayload(previous, current) {
+    const previousMetrics = previous.metrics || {};
+    const currentMetrics = current.metrics || {};
+    return {
+      source: "chrome_extension",
+      liveId: current.liveId || previous.liveId || DEFAULT_LIVE_ID,
+      timestamp: current.timestamp || new Date().toISOString(),
+      captured_api: TARGET_API,
+      metrics: {
+        ...previousMetrics,
+        ...currentMetrics,
+        dataRegion: {
+          ...(previousMetrics.dataRegion || {}),
+          ...(currentMetrics.dataRegion || {})
+        }
+      },
+      events: current.events && current.events.length ? current.events : previous.events || []
     };
   }
 
   function captureResponse(url, responseText) {
-    if (!String(url).includes(TARGET_API)) return;
+    if (!String(url || "").includes(TARGET_API)) return;
     const payload = parseJsonMaybe(responseText);
     if (!payload) return;
     const current = normalizeMtopPayload(payload);
-    const liveId = current.liveId || "default_live";
-    const previous = metricsByLiveId.get(liveId) || {};
-    const merged = mergeMetrics(previous, current);
+    const liveId = current.liveId || DEFAULT_LIVE_ID;
+    const merged = mergePayload(metricsByLiveId.get(liveId) || {}, current);
     metricsByLiveId.set(liveId, merged);
-    latestMetrics = merged;
-  }
-
-  function mergeMetrics(previous, current) {
-    const merged = { ...previous };
-    Object.entries(current).forEach(([key, value]) => {
-      if (value !== undefined) merged[key] = value;
-    });
-    merged.dataRegion = { ...(previous.dataRegion || {}), ...(current.dataRegion || {}) };
-    return merged;
+    latestPayload = merged;
   }
 
   const originalFetch = window.fetch;
@@ -169,21 +294,21 @@
   const originalOpen = XMLHttpRequest.prototype.open;
   const originalSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
-    this.__liveDirectorUrl = url;
+    this.__aiLiveDirectorUrl = url;
     return originalOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function patchedSend(...args) {
     this.addEventListener("load", () => {
       try {
-        captureResponse(this.__liveDirectorUrl || "", this.responseText || "");
+        captureResponse(this.__aiLiveDirectorUrl || "", this.responseText || "");
       } catch (_error) {}
     });
     return originalSend.apply(this, args);
   };
 
   window.setInterval(() => {
-    if (!latestMetrics || Date.now() - lastSentAt < SEND_INTERVAL_MS - 250) return;
+    if (!latestPayload || Date.now() - lastSentAt < SEND_INTERVAL_MS - 250) return;
     lastSentAt = Date.now();
-    window.postMessage({ type: "AI_LIVE_DIRECTOR_METRICS", payload: latestMetrics }, "*");
+    window.postMessage({ type: "AI_LIVE_DIRECTOR_METRICS", payload: latestPayload }, "*");
   }, 1000);
 })();

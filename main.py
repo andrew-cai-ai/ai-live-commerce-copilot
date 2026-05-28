@@ -153,6 +153,26 @@ async def live_metrics(request: Request) -> dict[str, Any]:
     }
 
 
+@app.post("/api/live-ingest")
+async def live_ingest(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    decision = live_data_connector.ingest_live_metrics(payload)
+    return {
+        "ok": True,
+        "source": "chrome_extension",
+        "valid_live_metrics": decision.valid_live_metrics,
+        "current_action": decision.current_action,
+        "livestream_mode": decision.livestream_mode,
+        "snapshot_count": len(live_data_connector.snapshots),
+        "last_updated": decision.snapshot.timestamp,
+    }
+
+
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(
     request: Request,

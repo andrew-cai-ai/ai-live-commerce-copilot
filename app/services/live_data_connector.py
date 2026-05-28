@@ -129,9 +129,9 @@ class LiveDataConnector:
         return decision
 
     def ingest_live_metrics(self, payload: dict[str, Any]) -> LiveDecision:
-        self.latest_ingested_payload = payload
+        self.latest_ingested_payload = _normalize_ingested_payload(payload)
         self.latest_ingested_at = time.time()
-        return self.get_decision(payload=payload)
+        return self.get_decision(payload=self.latest_ingested_payload)
 
     def _record_action(self, decision: LiveDecision) -> None:
         entry = _timeline_entry(decision)
@@ -153,8 +153,13 @@ class LiveDataConnector:
         payload: dict[str, Any] | None,
         warnings: list[str],
     ) -> tuple[dict[str, Any], str]:
+        if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
+            return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
+
         if payload:
-            return _unwrap_payload(payload), "page_payload"
+            normalized_payload = _normalize_ingested_payload(payload)
+            source = "chrome_extension" if normalized_payload.get("source") == "chrome_extension" else "page_payload"
+            return _unwrap_payload(normalized_payload), source
 
         if self.api_url:
             try:
@@ -166,9 +171,6 @@ class LiveDataConnector:
                 return _unwrap_payload(response.json()), "real_api"
             except Exception as exc:
                 warnings.append(f"Live metrics API failed, using fallback data: {exc}")
-
-        if self.latest_ingested_payload and time.time() - self.latest_ingested_at <= 30:
-            return _unwrap_payload(self.latest_ingested_payload), "chrome_extension"
 
         warnings.append("No live metrics connector data found.")
         return {}, "no_connector"
@@ -492,6 +494,26 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
     return {**payload, **encoded_metrics}
 
 
+def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    metrics = payload.get("metrics")
+    if not isinstance(metrics, dict):
+        return payload
+
+    normalized: dict[str, Any] = {**metrics}
+    if isinstance(metrics.get("dataRegion"), dict):
+        normalized["dataRegion"] = metrics["dataRegion"]
+    events = payload.get("events")
+    if isinstance(events, list):
+        normalized["interactSecKill"] = events
+    for key in ("source", "liveId", "timestamp", "captured_at", "captured_api"):
+        if payload.get(key) is not None:
+            normalized[key] = payload[key]
+    normalized["source"] = payload.get("source") or "chrome_extension"
+    return normalized
+
+
 _TOTAL_STATS_REQUIRED = (
     "heat_score",
     "ipv_uv_rate",
@@ -508,8 +530,7 @@ _DATA_REGION_REQUIRED = (
     "look_uv_5min_d_live",
     "pay_amt_td_d_live",
     "pay_amt_5min_d_live",
-    "pay_amt_td_d_shop",
-    "pay_amt_5min_d_shop",
+    "look_time_td_avg_d_live",
 )
 
 

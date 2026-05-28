@@ -30,7 +30,19 @@ It does not collect cookies, request headers, or authentication data.
 
 The extension will send normalized live metrics every 5 seconds to:
 
-`POST http://localhost:8000/live-metrics`
+`POST http://localhost:8000/api/live-ingest`
+
+Request body:
+
+```json
+{
+  "source": "chrome_extension",
+  "liveId": "...",
+  "timestamp": "...",
+  "metrics": {},
+  "events": []
+}
+```
 
 ## Normalized fields
 
@@ -49,6 +61,8 @@ The extension will send normalized live metrics every 5 seconds to:
 - `atn_uv`
 - `dataRegion`
 - `interactSecKill`
+
+The parser maps metrics only by exact `valueType`. For example, `uv` becomes total viewers, `online_uv` becomes current concurrent online users, and fields such as `look_uv_not_fans_rate` are ignored.
 
 Product-level metrics are prepared in the backend schema. If Taobao does not return them yet, the Live Director will show:
 

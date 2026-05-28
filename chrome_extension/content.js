@@ -1,5 +1,8 @@
 (() => {
-  const LOCAL_ENDPOINT = "http://localhost:8000/live-metrics";
+  const LOCAL_ENDPOINTS = [
+    "http://localhost:8000/api/live-ingest",
+    "http://127.0.0.1:8000/api/live-ingest"
+  ];
 
   const script = document.createElement("script");
   script.src = chrome.runtime.getURL("page_hook.js");
@@ -9,12 +12,20 @@
   window.addEventListener("message", async (event) => {
     if (event.source !== window) return;
     if (!event.data || event.data.type !== "AI_LIVE_DIRECTOR_METRICS") return;
+    const payload = event.data.payload || {};
     try {
-      await fetch(LOCAL_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(event.data.payload || {})
-      });
+      for (const endpoint of LOCAL_ENDPOINTS) {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (response.ok) return;
+        } catch (_error) {
+          // Try the next local loopback endpoint.
+        }
+      }
     } catch (_error) {
       // Local app may not be running yet. Do not collect or persist anything.
     }

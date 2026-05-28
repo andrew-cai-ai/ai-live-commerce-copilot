@@ -4,17 +4,19 @@
   "version": "0.1.0",
   "description": "Captures Taobao live assistant metric responses and sends normalized metrics to the local AI Live Director.",
   "permissions": [],
+  "action": {
+    "default_title": "AI Live Copilot",
+    "default_popup": "popup.html"
+  },
   "host_permissions": [
-    "*://*.taobao.com/*",
-    "*://*.tmall.com/*",
     "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+    "http://127.0.0.1:8000/*",
+    "*://liveplatform.taobao.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://*.taobao.com/*",
-        "*://*.tmall.com/*"
+        "*://liveplatform.taobao.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_start"
@@ -24,8 +26,7 @@
     {
       "resources": ["page_hook.js"],
       "matches": [
-        "*://*.taobao.com/*",
-        "*://*.tmall.com/*"
+        "*://liveplatform.taobao.com/*"
       ]
     }
   ]

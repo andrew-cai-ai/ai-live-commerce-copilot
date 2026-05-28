@@ -898,6 +898,7 @@ def _render_live_mode_dashboard() -> str:
             <div class="metric"><span>heat_score</span><b id="debug-heat-score">--</b></div>
             <div class="metric"><span>pay_amt</span><b id="debug-pay-amt">--</b></div>
             <div class="metric"><span>source</span><b id="debug-live-source">--</b></div>
+            <div class="metric"><span>Last updated</span><b id="debug-last-updated">--</b></div>
           </div>
         </div>
         <div class="live-input">
@@ -1312,13 +1313,17 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const heatScore = document.getElementById("debug-heat-score");
         const payAmt = document.getElementById("debug-pay-amt");
         const sourceNode = document.getElementById("debug-live-source");
-        if (!onlineUv || !heatScore || !payAmt || !sourceNode) {
+        const lastUpdated = document.getElementById("debug-last-updated");
+        if (!onlineUv || !heatScore || !payAmt || !sourceNode || !lastUpdated) {
           return;
         }
         onlineUv.textContent = metrics ? Math.round(toNumber(metrics.online_uv)).toLocaleString() : "--";
         heatScore.textContent = metrics ? String(toNumber(metrics.heat_score_raw)) : "--";
         payAmt.textContent = metrics ? formatMoney(toNumber(metrics.pay_amt)) : "--";
         sourceNode.textContent = source || "--";
+        lastUpdated.textContent = metrics && metrics.last_updated
+          ? new Date(metrics.last_updated * 1000).toLocaleTimeString("zh-CN", { hour12: false })
+          : "--";
       }
 
       function updatePayloadDebug(source, parseSuccess, metrics) {
@@ -1773,6 +1778,17 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       async function simulateLiveMetrics() {
+        try {
+          const connectorDecision = await fetchLiveDecision();
+          if (connectorDecision.valid_live_metrics !== false) {
+            renderConnectorDecision(connectorDecision);
+            return;
+          }
+          console.log("connector returned no valid live metrics; trying manual fallback");
+        } catch (error) {
+          console.log("connector failed; trying manual fallback", error);
+          document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
+        }
         const pastedPayload = updateLiveDirectorStateFromTextarea();
         if (pastedPayload && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
           updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
@@ -1786,17 +1802,6 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
               : "Pasted payload exists but JSON parse failed. Mock simulator disabled."
           );
           return;
-        }
-        try {
-          const connectorDecision = await fetchLiveDecision();
-          if (connectorDecision.valid_live_metrics !== false) {
-            renderConnectorDecision(connectorDecision);
-            return;
-          }
-          console.log("connector returned no valid live metrics; trying manual fallback");
-        } catch (error) {
-          console.log("connector failed; trying manual fallback", error);
-          document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
         }
         const manualMetrics = manualMetricsFromInputs();
         if (manualMetrics && hasValidLiveMetrics(manualMetrics)) {
@@ -2049,13 +2054,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function renderConnectorDecision(data) {
-        if (liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
-          updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
-          renderLiveDecision(liveDirectorState.latestMetrics);
-          return;
-        }
         const metrics = metricsFromConnector(data.snapshot);
         metrics.missing_metrics = data.missing_metrics || [];
+        metrics.last_updated = data.snapshot ? data.snapshot.timestamp : 0;
         const decisionName = normalizeDecisionName(data.current_action);
         const decision = {
           decision: decisionName,
@@ -2067,11 +2068,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const trends = trendsFromConnector(data);
         const queue = buildRecommendedQueue(metrics, { decision: decisionName });
         const liveScore = data.current_live_score ?? metrics.current_product_score;
-        const noValidMetrics = data.valid_live_metrics === false && !liveDirectorState.hasValidPastedPayload;
+        const noValidMetrics = data.valid_live_metrics === false;
         const debugSource = data.source === "page_payload"
           ? "pasted"
           : data.source === "chrome_extension"
-          ? "connector"
+          ? "extension"
           : data.source === "real_api"
           ? "connector"
           : "mock";
