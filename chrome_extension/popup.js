@@ -81,27 +81,111 @@ function activeTabMatches(url) {
 }
 
 function inspectActiveTab() {
+  let responded = false;
+  window.setTimeout(() => {
+    if (!responded) {
+      inspectActiveTabDirect("Background inspect timed out.");
+    }
+  }, 800);
   chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INSPECT_TAB" }, (response) => {
+    responded = true;
     if (chrome.runtime.lastError) {
-      updateStatus({ lastError: chrome.runtime.lastError.message }, refresh);
+      inspectActiveTabDirect(chrome.runtime.lastError.message);
       return;
     }
     updateStatus(response || {}, refresh);
   });
 }
 
+function inspectActiveTabDirect(errorMessage) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0] ? tabs[0] : {};
+    let host = "";
+    try {
+      host = new URL(tab.url || "").hostname;
+    } catch (_error) {
+      host = "";
+    }
+    updateStatus({
+      activeTabId: tab.id || 0,
+      activeTabUrl: tab.url || "",
+      activeTabHost: host || "--",
+      activeTabMatches: activeTabMatches(tab.url || ""),
+      backgroundFallbackUsed: true,
+      lastError: errorMessage || ""
+    }, refresh);
+  });
+}
+
 function injectCurrentTab() {
   setText("manual-inject", "running", "warn");
   updateStatus({ manualInjectStatus: "running", lastError: "" }, refresh);
+  let responded = false;
+  window.setTimeout(() => {
+    if (!responded) {
+      injectCurrentTabDirect("Background injection timed out; used popup fallback.");
+    }
+  }, 1200);
   chrome.runtime.sendMessage({ type: "AI_LIVE_DIRECTOR_INJECT_ACTIVE_TAB" }, (response) => {
+    responded = true;
     if (chrome.runtime.lastError) {
-      updateStatus({
-        manualInjectStatus: "failed",
-        lastError: chrome.runtime.lastError.message
-      }, refresh);
+      injectCurrentTabDirect(chrome.runtime.lastError.message);
       return;
     }
     updateStatus(response || { manualInjectStatus: "failed", lastError: "No background response." }, refresh);
+  });
+}
+
+function injectCurrentTabDirect(reason) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs && tabs[0] ? tabs[0] : null;
+    if (!tab || !tab.id) {
+      updateStatus({ manualInjectStatus: "failed", lastError: "No active tab found." }, refresh);
+      return;
+    }
+    let host = "";
+    try {
+      host = new URL(tab.url || "").hostname;
+    } catch (_error) {
+      host = "";
+    }
+    if (!activeTabMatches(tab.url || "")) {
+      updateStatus({
+        activeTabId: tab.id,
+        activeTabUrl: tab.url || "",
+        activeTabHost: host || "--",
+        activeTabMatches: false,
+        manualInjectStatus: "failed",
+        lastError: "Current tab is not a Taobao/Tmall page."
+      }, refresh);
+      return;
+    }
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content.js"]
+    }, () => {
+      if (chrome.runtime.lastError) {
+        updateStatus({
+          activeTabId: tab.id,
+          activeTabUrl: tab.url || "",
+          activeTabHost: host || "--",
+          activeTabMatches: true,
+          manualInjectStatus: "failed",
+          lastError: chrome.runtime.lastError.message
+        }, refresh);
+        return;
+      }
+      updateStatus({
+        activeTabId: tab.id,
+        activeTabUrl: tab.url || "",
+        activeTabHost: host || "--",
+        activeTabMatches: true,
+        manualInjectStatus: "success",
+        manualInjectedAt: Date.now(),
+        backgroundFallbackUsed: true,
+        lastError: reason || ""
+      }, refresh);
+    });
   });
 }
 
