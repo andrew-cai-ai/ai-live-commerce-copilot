@@ -982,7 +982,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       const liveDirectorState = {
         latestPayload: null,
         latestMetrics: null,
-        hasValidPastedPayload: false
+        hasValidPastedPayload: false,
+        hasPastedTextareaContent: false,
+        payloadParseSuccess: false
       };
 
       function randomBetween(min, max) {
@@ -1137,6 +1139,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       function readAssistantPayload() {
         const input = document.getElementById("live-assistant-data-input");
         const textareaValue = input ? input.value : "";
+        liveDirectorState.hasPastedTextareaContent = !!textareaValue.trim();
         console.log("textarea value", textareaValue);
         if (!input || !textareaValue.trim()) {
           return null;
@@ -1186,6 +1189,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
+          liveDirectorState.payloadParseSuccess = false;
           updatePayloadDebug("pasted", false, null);
           document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + payload.error_message;
           return null;
@@ -1194,6 +1198,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.latestPayload = null;
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
+          liveDirectorState.payloadParseSuccess = false;
           updatePayloadDebug("--", false, null);
           return null;
         }
@@ -1203,6 +1208,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         liveDirectorState.latestPayload = payload;
         liveDirectorState.latestMetrics = metrics;
         liveDirectorState.hasValidPastedPayload = payloadHasValidMetrics || hasValidLiveMetrics(metrics);
+        liveDirectorState.payloadParseSuccess = true;
         if (liveDirectorState.hasValidPastedPayload) {
           updatePayloadDebug("pasted", true, metrics);
           renderLiveDecision(metrics);
@@ -1573,17 +1579,15 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const pastedPayload = updateLiveDirectorStateFromTextarea();
         if (pastedPayload && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
           updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
-          try {
-            const connectorDecision = await fetchLiveDecision();
-            if (connectorDecision.valid_live_metrics === false) {
-              renderLiveDecision(liveDirectorState.latestMetrics);
-            } else {
-              renderConnectorDecision(connectorDecision);
-            }
-          } catch (error) {
-            renderLiveDecision(liveDirectorState.latestMetrics);
-            document.getElementById("live-status").textContent = "Using pasted Taobao live payload · connector fallback ignored: " + error.message;
-          }
+          renderLiveDecision(liveDirectorState.latestMetrics);
+          return;
+        }
+        if (liveDirectorState.hasPastedTextareaContent) {
+          document.getElementById("live-status").textContent = (
+            liveDirectorState.payloadParseSuccess
+              ? "Pasted payload parsed, but no valid live metrics found. Mock simulator disabled."
+              : "Pasted payload exists but JSON parse failed. Mock simulator disabled."
+          );
           return;
         }
         try {
@@ -1838,7 +1842,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function renderConnectorDecision(data) {
-        if (data.valid_live_metrics === false && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
+        if (liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
           updatePayloadDebug("pasted", true, liveDirectorState.latestMetrics);
           renderLiveDecision(liveDirectorState.latestMetrics);
           return;
@@ -1913,6 +1917,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function renderLiveDecision(metrics) {
+        if (metrics.source === "mock" && liveDirectorState.hasPastedTextareaContent) {
+          console.log("mock simulator blocked because pasted payload exists");
+          return;
+        }
         enrichMetrics(metrics);
         pushMetricHistory(metrics);
         const trends = buildTrendSummary(metrics);
