@@ -11,22 +11,29 @@
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
-    "*://liveplatform.taobao.com/*"
+    "*://liveplatform.taobao.com/*",
+    "*://*.taobao.com/*",
+    "*://*.tmall.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://liveplatform.taobao.com/*"
+        "*://liveplatform.taobao.com/*",
+        "*://*.taobao.com/*",
+        "*://*.tmall.com/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["page_hook.js"],
       "matches": [
-        "*://liveplatform.taobao.com/*"
+        "*://liveplatform.taobao.com/*",
+        "*://*.taobao.com/*",
+        "*://*.tmall.com/*"
       ]
     }
   ]
