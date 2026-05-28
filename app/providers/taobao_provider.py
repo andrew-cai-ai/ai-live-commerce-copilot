@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import requests
@@ -52,7 +53,7 @@ class TaobaoProvider:
     def parse_pasted_json(self, pasted_json: str) -> list[TaobaoProduct]:
         if not pasted_json.strip():
             return []
-        payload = json.loads(pasted_json)
+        payload = json.loads(_normalize_taobao_payload(pasted_json))
         return parse_taobao_products(payload)
 
     def search_taobao_products(self, query: str = "Arc'teryx") -> list[TaobaoProduct]:
@@ -77,6 +78,16 @@ class TaobaoProvider:
 
     def search_social_signals(self, product_name: str, brand: str = "Arc'teryx") -> list[SocialSignal]:
         return []
+
+
+def _normalize_taobao_payload(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("{"):
+        return text
+    match = re.match(r"^[\w$]+\(([\s\S]*)\)\s*;?$", text)
+    if match:
+        return match.group(1)
+    raise ValueError("Unsupported Taobao payload format")
 
 
 def parse_taobao_products(payload: Any) -> list[TaobaoProduct]:

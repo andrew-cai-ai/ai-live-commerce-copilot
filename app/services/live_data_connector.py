@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from urllib.parse import unquote
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -445,16 +446,95 @@ def _timeline_event_type(decision: str, mode: str, signature: tuple[tuple[str, s
 def _unwrap_payload(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
+    encoded_metrics = _extract_taobao_encoded_metrics(payload)
     data = payload.get("data")
     if isinstance(data, dict):
         nested = data.get("data")
         if isinstance(nested, dict):
-            return nested
+            return {**nested, **encoded_metrics}
         result = data.get("result")
         if isinstance(result, dict):
-            return result
-        return data
-    return payload
+            return {**result, **encoded_metrics}
+        return {**data, **encoded_metrics}
+    return {**payload, **encoded_metrics}
+
+
+_ENCODED_METRIC_TERMS: dict[str, tuple[str, ...]] = {
+    "online_uv": ("online_uv", "onlineuv", "在线人数", "在线观众", "观看人数", "看播人数", "look_uv"),
+    "heat_score": ("heat_score", "heatscore", "热度", "热力值"),
+    "pay_amt": ("pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"),
+    "pay_byr_rate": ("pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"),
+    "ipv_uv_rate": ("ipv_uv_rate", "ipvuvrate", "点击率", "商品点击率", "进店率"),
+    "stay_time_pu": ("stay_time_pu", "staytimepu", "停留时长", "观看时长", "人均停留"),
+    "comment_uv": ("comment_uv", "commentuv", "评论人数", "评论用户", "评论"),
+    "pay_item_qty": ("pay_item_qty", "payitemqty", "成交件数", "支付件数", "销量"),
+    "pay_buyer_cnt": ("pay_buyer_cnt", "paybuyercnt", "成交人数", "支付买家数", "买家数"),
+}
+
+
+def _extract_taobao_encoded_metrics(payload: Any) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for data_list in _collect_data_lists(payload):
+        for section in data_list:
+            if not isinstance(section, dict):
+                continue
+            rows = section.get("data")
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                parsed = _parse_encoded_metric_row(row)
+                if not parsed:
+                    continue
+                field = _metric_field_from_label(parsed["label"])
+                if field and field not in metrics:
+                    metrics[field] = parsed["numeric_value"]
+    return metrics
+
+
+def _collect_data_lists(node: Any) -> list[list[Any]]:
+    lists: list[list[Any]] = []
+    if isinstance(node, dict):
+        data_list = node.get("dataList")
+        if isinstance(data_list, list):
+            lists.append(data_list)
+        for value in node.values():
+            lists.extend(_collect_data_lists(value))
+    elif isinstance(node, list):
+        for item in node:
+            lists.extend(_collect_data_lists(item))
+    return lists
+
+
+def _parse_encoded_metric_row(row: Any) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    raw_value = row.get("value") or row.get("dataValue") or row.get("metricValue")
+    if not raw_value:
+        return None
+    decoded = unquote(str(raw_value))
+    parts = decoded.split(",")
+    label_parts = [
+        str(row.get(key) or "")
+        for key in ("key", "name", "title", "code", "fieldName")
+        if row.get(key)
+    ]
+    if parts:
+        label_parts.append(parts[0])
+    numeric_value = _to_number(parts[3] if len(parts) > 3 else parts[2] if len(parts) > 2 else "")
+    return {
+        "label": " ".join(label_parts),
+        "value_type": parts[1] if len(parts) > 1 else "",
+        "display_value": parts[2] if len(parts) > 2 else "",
+        "numeric_value": numeric_value,
+    }
+
+
+def _metric_field_from_label(label: str) -> str:
+    normalized = re.sub(r"[\s_\-]+", "", label.lower())
+    for field, terms in _ENCODED_METRIC_TERMS.items():
+        if any(re.sub(r"[\s_\-]+", "", term.lower()) in normalized for term in terms):
+            return field
+    return ""
 
 
 def _pick(data: dict[str, Any], *keys: str) -> Any:

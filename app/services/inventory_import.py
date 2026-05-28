@@ -136,7 +136,7 @@ def _load_table_rows(file_bytes: bytes, filename: str) -> list[tuple[Any, ...]]:
 
 def parse_taobao_inventory_json(raw_json: str) -> list[InventoryItem]:
     try:
-        payload = json.loads(raw_json)
+        payload = json.loads(_normalize_taobao_payload(raw_json))
     except json.JSONDecodeError as exc:
         raise ValueError(f"淘宝 JSON 解析失败：第 {exc.lineno} 行第 {exc.colno} 列不是有效 JSON。") from exc
 
@@ -156,6 +156,16 @@ def parse_taobao_inventory_json(raw_json: str) -> list[InventoryItem]:
         )
         for product in products
     ]
+
+
+def _normalize_taobao_payload(raw_text: str) -> str:
+    text = raw_text.strip()
+    if text.startswith("{"):
+        return text
+    match = re.match(r"^[\w$]+\(([\s\S]*)\)\s*;?$", text)
+    if match:
+        return match.group(1)
+    raise ValueError("不支持的淘宝 payload 格式。请粘贴 JSON 或 mtopjsonp(... ) JSONP 响应。")
 
 
 def _dedupe_inventory_items(items: list[InventoryItem]) -> list[InventoryItem]:

@@ -1127,16 +1127,121 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return null;
         }
         const payload = raw.data && typeof raw.data === "object" ? raw.data : raw;
+        const encodedMetrics = extractTaobaoDataListMetrics(payload);
         if (payload.data && typeof payload.data === "object") {
           if (payload.data.data && typeof payload.data.data === "object") {
-            return payload.data.data;
+            return Object.assign({}, payload.data.data, encodedMetrics);
           }
           if (payload.data.result && typeof payload.data.result === "object") {
-            return payload.data.result;
+            return Object.assign({}, payload.data.result, encodedMetrics);
           }
-          return payload.data;
+          return Object.assign({}, payload.data, encodedMetrics);
         }
-        return payload;
+        return Object.assign({}, payload, encodedMetrics);
+      }
+
+      function normalizeTaobaoPayload(input) {
+        const text = String(input || "").trim();
+        if (text.startsWith("{")) {
+          return text;
+        }
+        const match = text.match(/^[\\w$]+\\(([\\s\\S]*)\\)\\s*;?$/);
+        if (match) {
+          return match[1];
+        }
+        throw new Error("Unsupported Taobao payload format");
+      }
+
+      const encodedMetricMap = [
+        { field: "online_uv", terms: ["online_uv", "onlineuv", "在线人数", "在线观众", "观看人数", "看播人数", "look_uv"] },
+        { field: "heat_score", terms: ["heat_score", "heatscore", "热度", "热力值"] },
+        { field: "pay_amt", terms: ["pay_amt", "payamt", "成交金额", "支付金额", "引导成交金额"] },
+        { field: "pay_byr_rate", terms: ["pay_byr_rate", "paybyrrate", "成交转化率", "支付转化率", "买家转化率"] },
+        { field: "ipv_uv_rate", terms: ["ipv_uv_rate", "ipvuvrate", "点击率", "商品点击率", "进店率"] },
+        { field: "stay_time_pu", terms: ["stay_time_pu", "staytimepu", "停留时长", "观看时长", "人均停留"] },
+        { field: "comment_uv", terms: ["comment_uv", "commentuv", "评论人数", "评论用户", "评论"] },
+        { field: "pay_item_qty", terms: ["pay_item_qty", "payitemqty", "成交件数", "支付件数", "销量"] },
+        { field: "pay_buyer_cnt", terms: ["pay_buyer_cnt", "paybuyercnt", "成交人数", "支付买家数", "买家数"] }
+      ];
+
+      function extractTaobaoDataListMetrics(payload) {
+        const metrics = {};
+        const lists = [];
+        collectDataLists(payload, lists);
+        lists.forEach(function(list) {
+          list.forEach(function(section) {
+            const rows = section && Array.isArray(section.data) ? section.data : [];
+            rows.forEach(function(row) {
+              const parsed = parseEncodedMetricRow(row);
+              if (!parsed) {
+                return;
+              }
+              const field = metricFieldFromLabel(parsed.label);
+              if (field && metrics[field] === undefined) {
+                metrics[field] = parsed.numericValue;
+              }
+            });
+          });
+        });
+        return metrics;
+      }
+
+      function collectDataLists(node, lists) {
+        if (!node || typeof node !== "object") {
+          return;
+        }
+        if (Array.isArray(node)) {
+          node.forEach(function(item) { collectDataLists(item, lists); });
+          return;
+        }
+        if (Array.isArray(node.dataList)) {
+          lists.push(node.dataList);
+        }
+        Object.keys(node).forEach(function(key) {
+          collectDataLists(node[key], lists);
+        });
+      }
+
+      function parseEncodedMetricRow(row) {
+        if (!row || typeof row !== "object") {
+          return null;
+        }
+        const rawValue = row.value || row.dataValue || row.metricValue || "";
+        if (!rawValue) {
+          return null;
+        }
+        const decoded = decodeURIComponent(String(rawValue));
+        const parts = decoded.split(",");
+        const labelParts = [
+          row.key,
+          row.name,
+          row.title,
+          row.code,
+          row.fieldName,
+          parts[0]
+        ].filter(Boolean);
+        const numericValue = toNumber(parts[3] !== undefined ? parts[3] : parts[2]);
+        if (!numericValue && numericValue !== 0) {
+          return null;
+        }
+        return {
+          label: labelParts.join(" "),
+          valueType: parts[1] || "",
+          displayValue: parts[2] || "",
+          numericValue: numericValue
+        };
+      }
+
+      function metricFieldFromLabel(label) {
+        const normalized = String(label || "").toLowerCase().replace(/[\\s_\\-]+/g, "");
+        for (const item of encodedMetricMap) {
+          if (item.terms.some(function(term) {
+            return normalized.includes(String(term).toLowerCase().replace(/[\\s_\\-]+/g, ""));
+          })) {
+            return item.field;
+          }
+        }
+        return "";
       }
 
       function readAssistantPayload() {
@@ -1148,7 +1253,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return null;
         }
         try {
-          const raw = JSON.parse(textareaValue);
+          const normalizedText = normalizeTaobaoPayload(textareaValue);
+          const raw = JSON.parse(normalizedText);
           const payload = normalizeAssistantPayload(raw);
           console.log("raw payload", raw);
           console.log("normalized payload", payload);
