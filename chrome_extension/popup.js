@@ -29,6 +29,7 @@ function render(status) {
   const sent = yesNo(status.lastSendSuccess);
 
   setText("content-script", content[0], content[1]);
+  setText("content-heartbeat", timeText(status.contentHeartbeatAt), status.contentHeartbeatAt ? "good" : "");
   setText("page-hook", hook[0], hook[1]);
   setText("captured-api", captured[0], captured[1]);
   setText("parse-success", parsed[0], parsed[1]);

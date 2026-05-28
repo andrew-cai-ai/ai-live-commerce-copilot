@@ -37,12 +37,20 @@
   updateStatus({
     contentScriptInjected: true,
     contentScriptInjectedAt: now(),
+    contentHeartbeatAt: now(),
     pageHookInjected: false,
     capturedTargetApi: false,
     lastParseSuccess: false,
     lastSendSuccess: false,
     lastError: ""
   });
+
+  window.setInterval(() => {
+    updateStatus({
+      contentScriptInjected: true,
+      contentHeartbeatAt: now()
+    });
+  }, 1000);
 
   const script = document.createElement("script");
   script.src = chrome.runtime.getURL("page_hook.js");
