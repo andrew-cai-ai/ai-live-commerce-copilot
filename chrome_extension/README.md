@@ -6,6 +6,26 @@ This Chrome Extension captures only the response body for:
 
 It does not collect cookies, request headers, or authentication data.
 
+## Cloud setup for hosts
+
+The extension sends live metrics to the Render app first:
+
+`POST https://ai-live-commerce-copilot.onrender.com/api/live-ingest`
+
+If cloud posting fails, it falls back to local development endpoints:
+
+- `POST http://localhost:8000/api/live-ingest`
+- `POST http://127.0.0.1:8000/api/live-ingest`
+
+Host workflow:
+
+1. Install this folder with Chrome `Load unpacked`.
+2. Open the cloud app and log in:
+   `https://ai-live-commerce-copilot.onrender.com`
+3. Open the Taobao live backend realtime data page while logged in.
+4. Click the extension icon and confirm:
+   `Content script = yes`, `Page hook = yes`, `Target API captured = yes`, `Sent to app = yes`.
+
 ## Local setup
 
 1. Run the FastAPI app locally on port `8000`:
@@ -28,9 +48,9 @@ It does not collect cookies, request headers, or authentication data.
 
 6. Open the Taobao live backend page while logged in.
 
-The extension will send normalized live metrics every 5 seconds to:
+The extension will send normalized live metrics every 5 seconds to cloud first, then local fallback:
 
-`POST http://localhost:8000/api/live-ingest`
+`POST https://ai-live-commerce-copilot.onrender.com/api/live-ingest`
 
 Request body:
 

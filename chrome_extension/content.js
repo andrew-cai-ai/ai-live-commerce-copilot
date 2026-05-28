@@ -4,7 +4,8 @@
   }
   window.__aiLiveDirectorContentInjected = true;
 
-  const LOCAL_ENDPOINTS = [
+  const INGEST_ENDPOINTS = [
+    "https://ai-live-commerce-copilot.onrender.com/api/live-ingest",
     "http://localhost:8000/api/live-ingest",
     "http://127.0.0.1:8000/api/live-ingest"
   ];
@@ -75,7 +76,7 @@
     });
 
     let lastError = "";
-    for (const endpoint of LOCAL_ENDPOINTS) {
+    for (const endpoint of INGEST_ENDPOINTS) {
       try {
         const response = await fetch(endpoint, {
           method: "POST",

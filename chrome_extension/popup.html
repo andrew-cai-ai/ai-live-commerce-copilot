@@ -89,7 +89,7 @@
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
-    <div class="version">Debug build: 2026-05-28-v10</div>
+    <div class="version">Debug build: 2026-05-28-v11 · Cloud: ai-live-commerce-copilot.onrender.com</div>
     <button class="top-action" id="inject-now">手动注入当前页面</button>
     <div class="status">
       <div class="row"><span>Popup JS</span><b id="popup-js">not loaded</b></div>
@@ -109,7 +109,7 @@
       <div class="row"><span>Manual inject</span><b id="manual-inject">--</b></div>
       <div class="row"><span>Error</span><b id="error">--</b></div>
     </div>
-    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页，并确保本地 app 正在 http://localhost:8000 运行。</div>
+    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页；插件会优先发送到 Render 云端，失败时再尝试本地 localhost。</div>
     <button id="clear-status">清空状态</button>
     <script src="popup.js"></script>
   </body>
