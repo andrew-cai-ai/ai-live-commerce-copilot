@@ -212,13 +212,15 @@ class LiveDataConnector:
     ) -> tuple[dict[str, Any], str, str]:
         session = self._session(host_id)
         if session.latest_ingested_payload and time.time() - session.latest_ingested_at <= 30:
-            return _unwrap_payload(session.latest_ingested_payload), "chrome_extension", host_id
+            data = _overlay_live_context(_unwrap_payload(session.latest_ingested_payload), payload)
+            return data, "chrome_extension", host_id
 
         fresh_sessions = self._fresh_sessions()
         if host_id == "default" and len(fresh_sessions) == 1:
             active_host_id, active_session = fresh_sessions[0]
             warnings.append(f"Using only active live room: {active_host_id}")
-            return _unwrap_payload(active_session.latest_ingested_payload), "chrome_extension", active_host_id
+            data = _overlay_live_context(_unwrap_payload(active_session.latest_ingested_payload), payload)
+            return data, "chrome_extension", active_host_id
         if host_id == "default" and len(fresh_sessions) > 1:
             warnings.append("Multiple active live rooms detected. Set host_id/liveId to choose one.")
 
@@ -612,6 +614,31 @@ def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     return normalized
 
 
+def _overlay_live_context(base_payload: dict[str, Any], context_payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(context_payload, dict):
+        return base_payload
+    normalized_context = _unwrap_payload(_normalize_ingested_payload(context_payload))
+    overlay: dict[str, Any] = {}
+    for key in (
+        "viewer_comments",
+        "comments",
+        "comment_text",
+        "authenticity_comments",
+        "authenticity_questions",
+        "sizing_comments",
+        "sizing_questions",
+        "current_product",
+        "item_name",
+        "itemName",
+    ):
+        value = normalized_context.get(key)
+        if value not in (None, ""):
+            overlay[key] = value
+    if not overlay:
+        return base_payload
+    return {**base_payload, **overlay}
+
+
 _TOTAL_STATS_REQUIRED = (
     "heat_score",
     "ipv_uv_rate",
@@ -644,9 +671,10 @@ def _missing_required_metrics(data: dict[str, Any]) -> list[str]:
         missing.extend(f"totalStats.{field}" for field in _TOTAL_STATS_REQUIRED)
     else:
         missing.extend(f"totalStats.{field}" for field in _TOTAL_STATS_REQUIRED if _pick(total_stats, field, _camelize(field)) is None)
-    if data_region is None:
+    # dataRegion enriches trend context, but totalStats alone is enough for live decisions.
+    if total_stats is None and data_region is None:
         missing.extend(f"dataRegion.{field}" for field in _DATA_REGION_REQUIRED)
-    else:
+    elif total_stats is None and data_region is not None:
         missing.extend(f"dataRegion.{field}" for field in _DATA_REGION_REQUIRED if _pick(data_region, field) is None)
     return missing
 

@@ -617,7 +617,12 @@ def _render_live_console() -> str:
           <div class="rooms" id="active-rooms"></div>
           <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
         </section>
-        <section class="panel"><span class="label">推荐商品队列</span><div class="queue" id="queue"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div></section>
+        <section class="panel">
+          <span class="label">推荐商品队列</span>
+          <textarea class="comments" id="product-list" placeholder="粘贴今天要讲的商品，每行一个&#10;Kragg Shirt&#10;Atom Jacket&#10;Gamma Pant"></textarea>
+          <div class="small">会参与“推荐下一件”决策，保存在本机浏览器。</div>
+          <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div>
+        </section>
         <section class="panel">
           <span class="label">观众问题助手</span>
           <textarea class="comments" id="comments" placeholder="粘贴评论，例如：175 70kg穿啥&#10;真的假的&#10;黑色有吗"></textarea>
@@ -628,13 +633,32 @@ def _render_live_console() -> str:
     </section>
   </main>
   <script>
-    const products = [];
+    let products = [];
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
     function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
     function hostId() { const input = document.getElementById("host-id-input"); return (input && input.value.trim()) || localStorage.getItem("ai_live_host_id") || "default"; }
     function setHostId(value) { const next = value || "default"; document.getElementById("host-id-input").value = next; document.getElementById("host-id-label").textContent = next; localStorage.setItem("ai_live_host_id", next); }
+    function bindProductList() {
+      const input = document.getElementById("product-list");
+      input.value = localStorage.getItem("ai_live_products") || "";
+      input.addEventListener("input", () => {
+        localStorage.setItem("ai_live_products", input.value);
+        products = productsFromInput();
+        refreshDecision();
+      });
+      products = productsFromInput();
+    }
+    function productsFromInput() {
+      const input = document.getElementById("product-list");
+      return (input.value || "").split("\\n").map((line, index) => line.trim()).filter(Boolean).slice(0, 50).map((name, index) => ({
+        name,
+        score: 1 - index * 0.01,
+        inventory: 1,
+        profit_margin: 0
+      }));
+    }
     function normalizeAction(action) {
       const text = String(action || "");
       if (text.includes("No valid")) return "等待真实数据";
@@ -670,7 +694,19 @@ def _render_live_console() -> str:
       } catch (error) { node.innerHTML = '<span class="small">读取活跃房间失败</span>'; }
     }
     async function refreshDecision() {
-      const response = await fetch("/api/live/decision", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ host_id: hostId(), products }) });
+      const comments = document.getElementById("comments").value || "";
+      const response = await fetch("/api/live/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host_id: hostId(),
+          products: productsFromInput(),
+          payload: {
+            host_id: hostId(),
+            viewer_comments: comments
+          }
+        })
+      });
       const data = await response.json();
       if (!data.error) renderDecision(data);
     }
@@ -704,7 +740,7 @@ def _render_live_console() -> str:
     }
     function renderQueue(data) {
       const node = document.getElementById("queue");
-      const current = (data.snapshot && data.snapshot.current_product) || "当前商品";
+      const current = (data.snapshot && data.snapshot.current_product) || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品";
       const next = data.recommended_next_product || "等待商品池";
       node.innerHTML = [["Now", current], ["Next", next], ["Action", normalizeAction(data.current_action)]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
     }
@@ -722,8 +758,9 @@ def _render_live_console() -> str:
       node.innerHTML = comments.map((comment) => '<div class="reply"><b>' + escapeHtml(comment) + '</b><div>' + escapeHtml(answerComment(comment)) + '</div></div>').join("");
     }
     document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
-    document.getElementById("comments").addEventListener("input", renderComments);
+    document.getElementById("comments").addEventListener("input", () => { renderComments(); refreshDecision(); });
     setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    bindProductList();
     refreshSessions(); refreshDecision();
     window.setInterval(refreshSessions, 10000);
     window.setInterval(refreshDecision, 5000);
