@@ -1,4 +1,7 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 
 from app.services.inventory_import import _normalize_taobao_payload
 from app.services.live_data_connector import (
@@ -11,6 +14,7 @@ from app.services.live_data_connector import (
     _parse_encoded_metric_row,
     _product_switched_during_window,
     _version_lt,
+    live_training_data,
 )
 
 
@@ -173,6 +177,44 @@ class LiveDataConnectorTests(unittest.TestCase):
         })
         self.assertTrue(_product_switched_during_window({"product": "Kragg Shirt"}, decision.snapshot))
         self.assertFalse(_product_switched_during_window({"product": "Gamma Pant"}, decision.snapshot))
+
+    def test_model_v0_guides_default_live_decision(self) -> None:
+        old_model_path = live_training_data.model_path
+        with tempfile.TemporaryDirectory() as dirname:
+            try:
+                live_training_data.model_path = Path(dirname) / "director_model_v0.json"
+                live_training_data.model_path.write_text(json.dumps({
+                    "schema_version": "director_model_v0",
+                    "accuracy": 0.75,
+                    "training_samples": 8,
+                    "model": {
+                        "actions": ["A004", "A007"],
+                        "action_counts": {"A004": 8, "A007": 1},
+                        "feature_counts": {},
+                    },
+                }), encoding="utf-8")
+                connector = LiveDataConnector()
+                decision = connector.ingest_live_metrics({
+                    "source": "chrome_extension",
+                    "host_id": "host-model",
+                    "liveId": "live-model",
+                    "metrics": {
+                        "online_uv": 30,
+                        "uv": 300,
+                        "pv": 600,
+                        "heat_score": 300,
+                        "pay_amt": 1000,
+                        "pay_byr_rate": 0.02,
+                        "ipv_uv_rate": 0.08,
+                        "comment_uv": 12,
+                        "item_name": "Kragg Shirt",
+                    },
+                })
+                self.assertEqual(decision.action_code, "A004")
+                self.assertEqual(decision.current_action, "explain value")
+                self.assertIn("model_v0 action", decision.reason[0])
+            finally:
+                live_training_data.model_path = old_model_path
 
 
 if __name__ == "__main__":

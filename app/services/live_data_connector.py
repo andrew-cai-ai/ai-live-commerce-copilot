@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 from app.services.live_memory import director_brief, live_memory
-from app.services.live_training_data import live_training_data
+from app.services.live_training_data import ACTION_LIBRARY, extract_comment_topics, infer_product_dna, live_training_data
 
 load_dotenv()
 
@@ -86,6 +86,7 @@ class LiveMetricSnapshot:
 class LiveDecision:
     valid_live_metrics: bool
     current_live_score: float
+    action_code: str
     current_action: str
     next_action: str
     recommended_next_product: str
@@ -580,6 +581,7 @@ class LiveDataConnector:
     ) -> LiveDecision:
         reason: list[str] = []
         confidence = 0.64
+        action_code = "A007"
         current_action = "continue product"
         next_action = "继续讲当前商品，观察 30 秒趋势"
         current_live_score = _current_live_score(snapshot)
@@ -595,76 +597,103 @@ class LiveDataConnector:
         learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
         if missing_metrics:
+            action_code = "A007"
             current_action = "数据不完整，等待 totalStats / 插件补齐"
             next_action = "先观察，不要根据缺失指标切品，等待 totalStats / 插件补齐。"
             reason = [f"missing: {metric}" for metric in missing_metrics[:3]]
             confidence = 0.0
             livestream_mode = "Waiting for complete live metrics"
         elif not valid_live_metrics:
+            action_code = "A007"
             current_action = "No valid live metrics detected"
             next_action = "Please paste valid Taobao mtop payload or configure live connector."
             reason = ["online_uv=0", "heat_score=0", "pay_amt=0"]
             confidence = 0.0
             livestream_mode = "No valid live metrics"
         elif snapshot.sizing_comments > 0:
+            action_code = "A001"
             current_action = "switch to sizing explanation"
             next_action = "集中讲尺码、身高体重和内搭建议"
             reason = ["comment keywords include size/尺码/身高体重", "sizing is blocking conversion", "answer sizing now"]
             confidence = 0.86
         elif snapshot.authenticity_comments > 0:
+            action_code = "A002"
             current_action = "show authenticity proof"
             next_action = "展示吊牌、洗标、拉链和细节"
             reason = ["comment keywords include 真假/正品", "trust is blocking conversion", "show proof now"]
             confidence = 0.86
         elif trend_30s["online_uv"] == "up" and trend_30s["heat_score"] == "up" and trend_30s["pay_amt"] == "up":
+            action_code = "A005"
             current_action = "continue product"
             next_action = "继续讲当前商品，别拉长解释，直接承接成交势能"
             reason = ["online_uv up", "heat_score up", "pay_amt up"]
             confidence = 0.86
         elif snapshot.pay_amt_5min_d_live <= 0 and trend_30s["online_uv"] == "down" and trend_30s["stay_time_pu"] == "down":
+            action_code = "A006"
             current_action = "switch product"
             next_action = "切到下一件更容易成交的商品"
             reason = ["pay_amt_5min_d_live is 0", "online_uv is falling", "stay_time_pu is falling"]
             confidence = 0.88
         elif snapshot.heat_score > 600 and snapshot.ipv_uv_rate > 0.15:
+            action_code = "A005"
             current_action = "push harder"
             next_action = "热度和点击都起来了，直接加速逼单"
             reason = ["heat_score > 600", "ipv_uv_rate > 15%", "traffic intent is strong"]
             confidence = 0.90
         elif snapshot.pay_amt_5min_d_live > 0 and snapshot.heat_score > 500:
+            action_code = "A005"
             current_action = "push harder"
             next_action = "刚有成交，继续讲卖点并制造尺码紧迫感"
             reason = ["pay_amt_5min_d_live > 0", "heat_score > 500", "recent live sales confirmed"]
             confidence = 0.87
         elif snapshot.pay_byr_rate < 0.01 and snapshot.ipv_uv_rate > 0.15:
+            action_code = "A004"
             current_action = "explain value"
             next_action = "解释价格、价值和使用场景"
             reason = ["pay_byr_rate < 1%", "ipv_uv_rate > 15%", "users are clicking but not paying"]
             confidence = 0.86
         elif recent_winners and recent_winners[0].payBuyerCnt >= 5:
+            action_code = "A005"
             current_action = "continue product"
             next_action = "复盘刚成交的款式，顺势推荐同类商品"
             reason = ["recent product event has high payBuyerCnt", f"winner: {recent_winners[0].title}", "recommend similar product next"]
             recommended_next_product = _recommend_similar_product(recent_winners[0].title, products) or recommended_next_product
             confidence = 0.82
         elif trend_30s["online_uv"] == "down" and trend_30s["item_add_cart_rate"] == "down":
+            action_code = "A006"
             current_action = "switch product"
             next_action = "切到下一件更容易成交的商品"
             reason = ["online_uv 30s down", "item_add_cart_rate 30s down", "traffic and cart intent are weakening"]
             confidence = 0.82
         elif trend_30s["item_click_rate"] == "up" and trend_30s["item_conversion_rate"] == "down":
+            action_code = "A004"
             current_action = "explain value"
             next_action = "解释价格、价值和使用场景"
             reason = ["item_click_rate 30s up", "item_conversion_rate 30s down", "users are interested but not paying"]
             confidence = 0.80
         else:
-            reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
+            model_prediction = live_training_data.predict_director_model_v0(
+                _director_model_state(snapshot, comment_clusters)
+            )
+            if model_prediction.get("status") == "predicted":
+                action_code = str(model_prediction.get("action_code") or "A007")
+                current_action, next_action = _action_code_directive(action_code)
+                confidence = max(confidence, float(model_prediction.get("confidence") or 0.0))
+                reason = [
+                    f"model_v0 action: {action_code} {model_prediction.get('action_name') or ''}".strip(),
+                    f"model accuracy: {model_prediction.get('model_accuracy')}",
+                    f"training samples: {model_prediction.get('training_samples')}",
+                ]
+            else:
+                action_code = "A007"
+                reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
         next_action = _apply_product_playbook(next_action, product_playbook, current_action)
 
         return LiveDecision(
             valid_live_metrics=valid_live_metrics,
             current_live_score=current_live_score,
+            action_code=action_code,
             current_action=current_action,
             next_action=next_action,
             recommended_next_product=recommended_next_product,
@@ -729,6 +758,7 @@ def _timeline_entry(decision: LiveDecision) -> dict[str, Any]:
     return {
         "timestamp": decision.snapshot.timestamp,
         "last_seen": decision.snapshot.timestamp,
+        "action_code": decision.action_code,
         "decision": decision.current_action,
         "mode": decision.livestream_mode,
         "reason": decision.reason,
@@ -1681,6 +1711,59 @@ def _apply_product_playbook(next_action: str, playbook: dict[str, Any], current_
         flow = " → ".join(str(item) for item in sequence[:4] if item)
         return f"按商品打法讲：{flow}。{conversion_line or next_action}"
     return next_action
+
+
+def _director_model_state(snapshot: LiveMetricSnapshot, comment_clusters: dict[str, Any]) -> dict[str, Any]:
+    dna = infer_product_dna(snapshot.current_product or "当前商品", {
+        "price": snapshot.item_gmv or snapshot.pay_amt_5min_d_live or snapshot.pay_amt,
+    })
+    return {
+        "heat": snapshot.heat_score,
+        "ctr": snapshot.item_click_rate or snapshot.ipv_uv_rate,
+        "cvr": snapshot.item_conversion_rate or snapshot.pay_byr_rate,
+        "gmv": snapshot.item_gmv,
+        "comments": snapshot.comment_uv,
+        "online_uv": snapshot.online_uv,
+        "product_category": dna.get("category"),
+        "product_tags": dna.get("tags") or [],
+        "season": dna.get("season"),
+        "price_band": dna.get("price_band"),
+        "comment_topics": _model_comment_topics(snapshot, comment_clusters),
+        "host_id": snapshot.host_id,
+    }
+
+
+def _model_comment_topics(snapshot: LiveMetricSnapshot, comment_clusters: dict[str, Any]) -> list[str]:
+    topics = extract_comment_topics(snapshot.comment_text or "")
+    if topics:
+        return topics
+    clustered = comment_clusters.get("clusters") if isinstance(comment_clusters, dict) else None
+    if not isinstance(clustered, list):
+        return []
+    output = []
+    for item in clustered:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("topic") or item.get("name") or "").strip()
+        if label:
+            output.append(label)
+    return output[:5]
+
+
+def _action_code_directive(action_code: str) -> tuple[str, str]:
+    directives = {
+        "A001": ("switch to sizing explanation", "直接回答尺码：身高体重、内搭、修身还是宽松，讲完马上引导下单。"),
+        "A002": ("show authenticity proof", "镜头拉近展示吊牌、洗标、拉链和走线，先把真假顾虑打掉。"),
+        "A003": ("show fit", "马上展示上身效果，讲版型、长度、肩宽和日常搭配。"),
+        "A004": ("explain value", "别继续堆参数，开始讲价格优势、使用频率和为什么值。"),
+        "A005": ("push harder", "少讲参数，强调库存、颜色尺码和现在下单的确定性。"),
+        "A006": ("switch product", "这件收一下，马上切到下一件更容易成交的商品。"),
+        "A007": ("engage comments", "让评论区扣 1 或报身高体重，把互动先拉起来。"),
+        "A008": ("explain use case", "开始讲通勤、日常、户外场景，让用户知道买回去怎么穿。"),
+    }
+    if action_code not in directives and action_code in ACTION_LIBRARY:
+        return (ACTION_LIBRARY[action_code]["name"], ACTION_LIBRARY[action_code]["name"])
+    return directives.get(action_code, directives["A007"])
 
 
 def _count_authenticity_comments(text: str) -> int:

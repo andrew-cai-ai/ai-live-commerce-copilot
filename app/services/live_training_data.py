@@ -51,7 +51,7 @@ class LiveTrainingDataService:
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         context = context or {}
-        action_code = classify_action(host_action.get("action_label") or host_action.get("decision") or "")
+        action_code = _clean_action_code(host_action.get("action_code")) or classify_action(host_action.get("action_label") or host_action.get("decision") or "")
         product_dna = infer_product_dna(product_name, context)
         quality = score_sample_quality(product_name, action_code, ai_decision, host_action, before_metrics, after_metrics, delta, context)
         reward = director_reward(delta, quality["score"])
@@ -275,6 +275,27 @@ class LiveTrainingDataService:
             "action_distribution": model["action_counts"],
         }
 
+    def predict_director_model_v0(self, state: dict[str, Any]) -> dict[str, Any]:
+        if not self.model_path.exists():
+            return {"status": "missing_model", "action_code": "", "confidence": 0.0}
+        try:
+            artifact = json.loads(self.model_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {"status": "invalid_model", "action_code": "", "confidence": 0.0, "error": str(exc)}
+        model = artifact.get("model") if isinstance(artifact, dict) else None
+        if not isinstance(model, dict):
+            return {"status": "invalid_model", "action_code": "", "confidence": 0.0}
+        action_code, scores = _predict_director_action_with_scores(model, state)
+        confidence = _prediction_confidence(scores, action_code)
+        return {
+            "status": "predicted",
+            "action_code": action_code,
+            "action_name": ACTION_LIBRARY.get(action_code, {}).get("name", action_code),
+            "confidence": confidence,
+            "model_accuracy": artifact.get("accuracy"),
+            "training_samples": artifact.get("training_samples"),
+        }
+
     def _append_jsonl(self, sample: dict[str, Any]) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         with self.training_path.open("a", encoding="utf-8") as handle:
@@ -450,7 +471,8 @@ def score_sample_quality(
         ai_decision.get("next_action"),
         " ".join(str(reason) for reason in (ai_decision.get("reason") or [])),
     ])
-    if ai_text and classify_action(ai_text) != action_code:
+    ai_action_code = _clean_action_code(ai_decision.get("action_code")) or (classify_action(ai_text) if ai_text else "")
+    if ai_action_code and ai_action_code != action_code:
         score -= 20
         reasons.append("host_action_differs_from_ai_recommendation")
     if _to_float(context.get("product_elapsed_seconds")) <= 0:
@@ -664,6 +686,11 @@ def _fit_director_model(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _predict_director_action(model: dict[str, Any], state: dict[str, Any]) -> str:
+    action, _scores = _predict_director_action_with_scores(model, state)
+    return action
+
+
+def _predict_director_action_with_scores(model: dict[str, Any], state: dict[str, Any]) -> tuple[str, dict[str, float]]:
     actions = model.get("actions") or list(ACTION_LIBRARY)
     action_counts = model.get("action_counts") or {}
     total = sum(int(value) for value in action_counts.values()) or 1
@@ -675,7 +702,20 @@ def _predict_director_action(model: dict[str, Any], state: dict[str, Any]) -> st
         bucket_total = sum(int(value) for value in bucket.values()) or 0
         for action in actions:
             scores[action] *= (int(bucket.get(action) or 0) + 1) / (bucket_total + len(actions))
-    return max(scores.items(), key=lambda item: item[1])[0] if scores else "A007"
+    action = max(scores.items(), key=lambda item: item[1])[0] if scores else "A007"
+    return action, scores
+
+
+def _prediction_confidence(scores: dict[str, float], action_code: str) -> float:
+    if not scores or not action_code:
+        return 0.0
+    total = sum(float(value) for value in scores.values()) or 1
+    return round(float(scores.get(action_code) or 0) / total, 4)
+
+
+def _clean_action_code(value: Any) -> str:
+    code = str(value or "").strip().upper()
+    return code if code in ACTION_LIBRARY else ""
 
 
 def _state_features(state: dict[str, Any]) -> list[str]:

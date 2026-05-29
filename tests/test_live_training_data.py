@@ -74,6 +74,22 @@ class LiveTrainingDataTests(unittest.TestCase):
             model = service.train_director_model_v0()
             self.assertEqual(model["status"], "trained")
             self.assertTrue((Path(dirname) / "model.json").exists())
+            prediction = service.predict_director_model_v0({
+                "heat": 500,
+                "ctr": 0.10,
+                "cvr": 0.02,
+                "gmv": 1000,
+                "comments": 10,
+                "online_uv": 80,
+                "product_category": "上衣/T恤",
+                "product_tags": ["日常", "尺码"],
+                "season": "春夏",
+                "price_band": "mid",
+                "comment_topics": ["尺码"],
+                "host_id": "Gigi",
+            })
+            self.assertEqual(prediction["status"], "predicted")
+            self.assertIn(prediction["action_code"], {"A001", "A004"})
 
     def test_train_v0_not_enough_data(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
@@ -84,6 +100,29 @@ class LiveTrainingDataTests(unittest.TestCase):
             )
             result = service.train_director_model_v0()
             self.assertEqual(result["status"], "not_enough_data")
+            prediction = service.predict_director_model_v0({"heat": 500})
+            self.assertEqual(prediction["status"], "missing_model")
+
+    def test_training_sample_prefers_explicit_action_code(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            service = LiveTrainingDataService(
+                Path(dirname) / "training.jsonl",
+                Path(dirname) / "graph.json",
+                Path(dirname) / "model.json",
+            )
+            sample = service.record_sample(
+                host_id="Gigi",
+                product_name="Kragg Shirt",
+                ai_decision={"action_code": "A004", "decision": "engage comments", "next_action": "评论区扣1"},
+                host_action={"action_code": "A004", "action_label": "评论区扣1"},
+                before_metrics={"timestamp": 100, "ctr": 0.10, "cvr": 0.02, "gmv": 1000},
+                after_metrics={"timestamp": 130, "ctr": 0.11, "cvr": 0.03, "gmv": 1300},
+                delta={"ctr": 0.01, "cvr": 0.01, "gmv": 300},
+                result="有效",
+                context={"product_elapsed_seconds": 60},
+            )
+            self.assertEqual(sample["action_code"], "A004")
+            self.assertNotIn("host_action_differs_from_ai_recommendation", sample["sample_quality_reasons"])
 
 
 if __name__ == "__main__":
