@@ -816,6 +816,7 @@ def _render_live_console() -> str:
             <button id="mark-executed" type="button" class="primary-action">我已照做，给下一步</button>
             <button id="copy-sentence" type="button" class="secondary-action">复制话术</button>
             <button id="voice-toggle" type="button" class="voice-action">耳机播报：关</button>
+            <button id="voice-replay" type="button" class="secondary-action">重播上一条</button>
             <span class="small">主播只需要：照着念，做完点绿色按钮。快捷键：E 执行 · C 复制</span>
           </div>
           <div class="toast" id="host-toast"></div>
@@ -837,6 +838,7 @@ def _render_live_console() -> str:
             <button id="mark-executed-sticky" type="button">我已照做，刷新下一步</button>
             <button id="copy-sentence-sticky" type="button" class="ghost">复制话术</button>
             <button id="voice-toggle-sticky" type="button" class="voice-action">耳机播报：关</button>
+            <button id="voice-replay-sticky" type="button" class="ghost">重播</button>
             <a href="/live/prompter" id="prompter-link">打开大字屏</a>
           </div>
           <div class="small" id="product-timer-hint">讲解节奏正常。</div>
@@ -890,6 +892,7 @@ def _render_live_console() -> str:
     let currentProductStartedAt = Date.now();
     let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
     let lastSpokenSignature = "";
+    let lastVoiceText = "";
     const urlParams = new URLSearchParams(location.search);
     const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
     if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
@@ -1023,6 +1026,7 @@ def _render_live_console() -> str:
       }
       const clean = String(text || "").replace(/\\s+/g, " ").trim();
       if (!clean) return;
+      lastVoiceText = clean;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = "zh-CN";
@@ -1037,6 +1041,10 @@ def _render_live_console() -> str:
       if (signature === lastSpokenSignature) return;
       lastSpokenSignature = signature;
       speakText("AI导演，" + mode + "。" + action + "。" + sentence);
+    }
+    function replayVoice() {
+      const text = lastVoiceText || ("AI导演，" + document.getElementById("director-mode").textContent + "。" + document.getElementById("current-action").textContent + "。" + document.getElementById("next-sentence").textContent);
+      speakText(text, true);
     }
     function toggleVoice() {
       voiceEnabled = !voiceEnabled;
@@ -1295,6 +1303,8 @@ def _render_live_console() -> str:
     document.getElementById("mark-executed-sticky").addEventListener("click", markExecuted);
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("voice-toggle-sticky").addEventListener("click", toggleVoice);
+    document.getElementById("voice-replay").addEventListener("click", replayVoice);
+    document.getElementById("voice-replay-sticky").addEventListener("click", replayVoice);
     document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
@@ -1403,6 +1413,7 @@ def _render_live_prompter() -> str:
           <button class="primary" id="copy-sentence" type="button">复制下一句</button>
           <button class="ghost" id="mark-executed" type="button">我已照做</button>
           <button class="voice" id="voice-toggle" type="button">耳机播报：关</button>
+          <button class="ghost" id="voice-replay" type="button">重播上一条</button>
           <span class="tiny">快捷键：C 复制 · E 标记执行</span>
         </div>
         <div class="toast" id="host-toast"></div>
@@ -1450,6 +1461,7 @@ def _render_live_prompter() -> str:
     let demoTick = 0;
     let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
     let lastSpokenSignature = "";
+    let lastVoiceText = "";
     const urlParams = new URLSearchParams(location.search);
     const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
     if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
@@ -1522,6 +1534,7 @@ def _render_live_prompter() -> str:
       }
       const clean = String(text || "").replace(/\\s+/g, " ").trim();
       if (!clean) return;
+      lastVoiceText = clean;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = "zh-CN";
@@ -1536,6 +1549,10 @@ def _render_live_prompter() -> str:
       if (signature === lastSpokenSignature) return;
       lastSpokenSignature = signature;
       speakText("AI导演，" + mode + "。" + action + "。" + sentence);
+    }
+    function replayVoice() {
+      const text = lastVoiceText || ("AI导演，" + document.getElementById("prompter-mode").textContent + "。" + document.getElementById("prompter-action").textContent + "。" + document.getElementById("prompter-sentence").textContent);
+      speakText(text, true);
     }
     function toggleVoice() {
       voiceEnabled = !voiceEnabled;
@@ -1714,6 +1731,7 @@ def _render_live_prompter() -> str:
     document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
     document.getElementById("mark-executed").addEventListener("click", markExecuted);
     document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
+    document.getElementById("voice-replay").addEventListener("click", replayVoice);
     document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
