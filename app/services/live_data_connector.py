@@ -291,6 +291,33 @@ class LiveDataConnector:
         self.action_history = session.action_history
         return {"ok": True, "host_id": resolved_host_id, "feedback": entry}
 
+    def set_boss_intervention(self, host_id: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+        resolved_host_id = _host_id_from_payload(payload, host_id)
+        session = self._session(resolved_host_id)
+        message = str(payload.get("message") or payload.get("action") or "").strip()[:160]
+        if not message:
+            message = "老板提醒：按 AI 建议调整讲解。"
+        intervention = {
+            "message": message,
+            "created_at": time.time(),
+            "created_by": str(payload.get("created_by") or "boss")[:80],
+            "host_id": resolved_host_id,
+        }
+        session.metadata["boss_intervention"] = intervention
+        return {"ok": True, "host_id": resolved_host_id, "intervention": intervention}
+
+    def get_boss_intervention(self, host_id: str | None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        resolved_host_id = _host_id_from_payload(payload or {}, host_id)
+        session = self.sessions.get(resolved_host_id)
+        intervention = dict((session.metadata.get("boss_intervention") if session else {}) or {})
+        if not intervention:
+            return {"ok": True, "host_id": resolved_host_id, "intervention": None}
+        age_seconds = time.time() - float(intervention.get("created_at") or 0)
+        if age_seconds > 180:
+            return {"ok": True, "host_id": resolved_host_id, "intervention": None}
+        intervention["age_seconds"] = round(age_seconds, 1)
+        return {"ok": True, "host_id": resolved_host_id, "intervention": intervention}
+
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
         clean_host_id = _clean_host_id(host_id)
         session = self._session(clean_host_id)
