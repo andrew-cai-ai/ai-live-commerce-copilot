@@ -769,6 +769,8 @@ def _render_live_console() -> str:
     .quick-actions .ghost { background: #e7efeb; color: var(--accent); }
     .primary-action { font-size: 22px; padding: 16px 20px; min-width: 220px; }
     .secondary-action { background: #e7efeb; color: var(--accent); }
+    .voice-action { background: #111827; color: #fff; }
+    .voice-action.on { background: #0c6b58; color: #fff; box-shadow: 0 0 0 3px rgba(12, 107, 88, .14); }
     .toast { color: var(--accent); font-weight: 900; min-height: 20px; }
     .sticky-action { position: sticky; bottom: 12px; z-index: 4; margin-top: 14px; border: 1px solid rgba(12, 107, 88, .24); box-shadow: 0 14px 40px rgba(22, 33, 31, .14); }
     details.panel { padding: 0; overflow: hidden; }
@@ -813,6 +815,7 @@ def _render_live_console() -> str:
           <div class="quick-actions">
             <button id="mark-executed" type="button" class="primary-action">我已照做，给下一步</button>
             <button id="copy-sentence" type="button" class="secondary-action">复制话术</button>
+            <button id="voice-toggle" type="button" class="voice-action">耳机播报：关</button>
             <span class="small">主播只需要：照着念，做完点绿色按钮。快捷键：E 执行 · C 复制</span>
           </div>
           <div class="toast" id="host-toast"></div>
@@ -833,6 +836,7 @@ def _render_live_console() -> str:
           <div class="quick-actions">
             <button id="mark-executed-sticky" type="button">我已照做，刷新下一步</button>
             <button id="copy-sentence-sticky" type="button" class="ghost">复制话术</button>
+            <button id="voice-toggle-sticky" type="button" class="voice-action">耳机播报：关</button>
             <a href="/live/prompter" id="prompter-link">打开大字屏</a>
           </div>
           <div class="small" id="product-timer-hint">讲解节奏正常。</div>
@@ -884,6 +888,8 @@ def _render_live_console() -> str:
     let demoTick = 0;
     let currentProductName = "";
     let currentProductStartedAt = Date.now();
+    let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
+    let lastSpokenSignature = "";
     const urlParams = new URLSearchParams(location.search);
     const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
     if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
@@ -1001,6 +1007,48 @@ def _render_live_console() -> str:
       if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
       return nextAction || "哥几个看一下，这件现在数据还不错，先继续讲 30 秒。";
     }
+    function updateVoiceButtons() {
+      ["voice-toggle", "voice-toggle-sticky"].forEach((id) => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.textContent = voiceEnabled ? "耳机播报：开" : "耳机播报：关";
+        button.classList.toggle("on", voiceEnabled);
+      });
+    }
+    function speakText(text, force = false) {
+      if (!voiceEnabled && !force) return;
+      if (!("speechSynthesis" in window)) {
+        showHostToast("当前浏览器不支持语音播报。");
+        return;
+      }
+      const clean = String(text || "").replace(/\\s+/g, " ").trim();
+      if (!clean) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = "zh-CN";
+      utterance.rate = 1.05;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+    function maybeSpeakDecision(data, action, sentence) {
+      if (!voiceEnabled || !data.valid_live_metrics) return;
+      const mode = directorModeLabel(data.livestream_mode);
+      const signature = [mode, action, sentence].join("|");
+      if (signature === lastSpokenSignature) return;
+      lastSpokenSignature = signature;
+      speakText("AI导演，" + mode + "。" + action + "。" + sentence);
+    }
+    function toggleVoice() {
+      voiceEnabled = !voiceEnabled;
+      localStorage.setItem("ai_live_voice_enabled", voiceEnabled ? "1" : "0");
+      updateVoiceButtons();
+      if (voiceEnabled) {
+        speakText("耳机播报已开启。后面 AI 导演变化，我会直接提醒你。", true);
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        showHostToast("耳机播报已关闭。");
+      }
+    }
     async function refreshSessions() {
       const node = document.getElementById("active-rooms");
       if (liveMode === "demo") {
@@ -1085,7 +1133,8 @@ def _render_live_console() -> str:
       const plan = directorPlan(data.current_action, data.recommended_next_product);
       document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
       document.getElementById("current-action").textContent = action;
-      document.getElementById("next-sentence").textContent = nextSentence(data.current_action, data.next_action);
+      const sentence = nextSentence(data.current_action, data.next_action);
+      document.getElementById("next-sentence").textContent = sentence;
       document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
       document.getElementById("director-now").textContent = plan[0];
       document.getElementById("director-next").textContent = plan[1];
@@ -1105,6 +1154,7 @@ def _render_live_console() -> str:
       renderTimeline(data.timeline || []);
       renderQueue(data);
       updateChecklist();
+      maybeSpeakDecision(data, action, sentence);
     }
     function updateProductTimer(productName) {
       if (productName !== currentProductName) {
@@ -1243,6 +1293,8 @@ def _render_live_console() -> str:
     document.getElementById("copy-sentence-sticky").addEventListener("click", copyNextSentence);
     document.getElementById("mark-executed").addEventListener("click", markExecuted);
     document.getElementById("mark-executed-sticky").addEventListener("click", markExecuted);
+    document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
+    document.getElementById("voice-toggle-sticky").addEventListener("click", toggleVoice);
     document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
@@ -1252,6 +1304,7 @@ def _render_live_console() -> str:
     });
     setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     if (workspaceId) document.getElementById("prompter-link").href = "/live/prompter?workspace_id=" + encodeURIComponent(workspaceId);
+    updateVoiceButtons();
     bindProductList();
     setMode(liveMode);
     refreshSessions(); refreshDecision();
@@ -1310,6 +1363,8 @@ def _render_live_prompter() -> str:
     .status-line { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-weight: 850; margin-top: 10px; }
     .prompter-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .prompter-actions .ghost { background: #14201d; color: var(--accent); }
+    .prompter-actions .voice { background: #1f2937; color: #f9fafb; }
+    .prompter-actions .voice.on { background: var(--accent); color: #05201b; }
     .toast { color: var(--accent); font-weight: 950; min-height: 22px; font-size: 18px; }
     .boss-alert { display: none; border: 1px solid rgba(251, 191, 36, .36); background: rgba(251, 191, 36, .10); color: #fde68a; border-radius: 14px; padding: 14px; margin-bottom: 16px; font-size: clamp(20px, 2.4vw, 34px); font-weight: 950; line-height: 1.12; }
     .boss-alert.show { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
@@ -1347,6 +1402,7 @@ def _render_live_prompter() -> str:
         <div class="prompter-actions">
           <button class="primary" id="copy-sentence" type="button">复制下一句</button>
           <button class="ghost" id="mark-executed" type="button">我已照做</button>
+          <button class="voice" id="voice-toggle" type="button">耳机播报：关</button>
           <span class="tiny">快捷键：C 复制 · E 标记执行</span>
         </div>
         <div class="toast" id="host-toast"></div>
@@ -1392,6 +1448,8 @@ def _render_live_prompter() -> str:
     let currentProduct = "";
     let productStartedAt = Date.now();
     let demoTick = 0;
+    let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
+    let lastSpokenSignature = "";
     const urlParams = new URLSearchParams(location.search);
     const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
     if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
@@ -1449,6 +1507,46 @@ def _render_live_prompter() -> str:
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
       if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
       return fallback || "哥几个看一下，这件再讲 30 秒，看数据能不能继续顶上去。";
+    }
+    function updateVoiceButton() {
+      const button = document.getElementById("voice-toggle");
+      if (!button) return;
+      button.textContent = voiceEnabled ? "耳机播报：开" : "耳机播报：关";
+      button.classList.toggle("on", voiceEnabled);
+    }
+    function speakText(text, force = false) {
+      if (!voiceEnabled && !force) return;
+      if (!("speechSynthesis" in window)) {
+        showHostToast("当前浏览器不支持语音播报。");
+        return;
+      }
+      const clean = String(text || "").replace(/\\s+/g, " ").trim();
+      if (!clean) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = "zh-CN";
+      utterance.rate = 1.05;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+    function maybeSpeakDecision(data, action, sentence) {
+      if (!voiceEnabled || !data.valid_live_metrics) return;
+      const mode = directorModeLabel(data.livestream_mode);
+      const signature = [mode, action, sentence].join("|");
+      if (signature === lastSpokenSignature) return;
+      lastSpokenSignature = signature;
+      speakText("AI导演，" + mode + "。" + action + "。" + sentence);
+    }
+    function toggleVoice() {
+      voiceEnabled = !voiceEnabled;
+      localStorage.setItem("ai_live_voice_enabled", voiceEnabled ? "1" : "0");
+      updateVoiceButton();
+      if (voiceEnabled) {
+        speakText("耳机播报已开启。后面 AI 导演变化，我会直接提醒你。", true);
+      } else if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        showHostToast("耳机播报已关闭。");
+      }
     }
     async function autoPickFreshHost() {
       try {
@@ -1511,7 +1609,8 @@ def _render_live_prompter() -> str:
       const tone = actionTone(rawAction || action);
       if (tone === "warn") actionNode.classList.add("warn");
       if (tone === "danger") actionNode.classList.add("danger");
-      document.getElementById("prompter-sentence").textContent = sentenceFor(rawAction, data.next_action);
+      const sentence = sentenceFor(rawAction, data.next_action);
+      document.getElementById("prompter-sentence").textContent = sentence;
       document.getElementById("prompter-reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "等待更多趋势数据。";
       document.getElementById("source-pill").textContent = data.valid_live_metrics ? "实时数据已连接" : "等待有效直播数据";
       if (data.source === "demo") document.getElementById("source-pill").textContent = "演示模式";
@@ -1525,6 +1624,7 @@ def _render_live_prompter() -> str:
       const product = snapshot.current_product || (productsFromStorage()[0] && productsFromStorage()[0].name) || "--";
       updateProduct(product);
       renderQueue(product, data.recommended_next_product, action);
+      maybeSpeakDecision(data, action, sentence);
     }
     function updateProduct(productName) {
       if (productName !== currentProduct) {
@@ -1613,6 +1713,7 @@ def _render_live_prompter() -> str:
     document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
     document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
     document.getElementById("mark-executed").addEventListener("click", markExecuted);
+    document.getElementById("voice-toggle").addEventListener("click", toggleVoice);
     document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
@@ -1621,6 +1722,7 @@ def _render_live_prompter() -> str:
       if (event.key.toLowerCase() === "e") markExecuted();
     });
     setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    updateVoiceButton();
     autoPickFreshHost().then(() => { refreshDecision(); refreshBossIntervention(); });
     window.setInterval(refreshDecision, 5000);
     window.setInterval(refreshBossIntervention, 5000);
