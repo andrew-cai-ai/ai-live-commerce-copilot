@@ -300,7 +300,7 @@ class LiveDataConnector:
         session = self._session(resolved_host_id)
         message = str(payload.get("message") or payload.get("action") or "").strip()[:160]
         if not message:
-            message = "老板提醒：按 AI 建议调整讲解。"
+            message = "人工提醒：请结合 AI 数据建议调整讲解。"
         intervention = {
             "message": message,
             "created_at": time.time(),
@@ -334,14 +334,14 @@ class LiveDataConnector:
         intervention["acknowledged_at"] = time.time()
         intervention["acknowledged_by"] = str(payload.get("acknowledged_by") or "host")[:80]
         session.metadata["boss_intervention"] = intervention
-        message = str(intervention.get("message") or "老板指令").strip()[:160]
+        message = str(intervention.get("message") or "人工提醒").strip()[:160]
         entry = {
             "timestamp": time.time(),
             "last_seen": time.time(),
-            "decision": "主播已确认老板指令",
-            "mode": "Boss intervention ack",
+            "decision": "主播已确认人工提醒",
+            "mode": "Manual intervention ack",
             "reason": [message],
-            "next_action": "已收到并准备执行老板提醒",
+            "next_action": "已收到人工提醒，继续以实时数据指挥为主",
             "confidence": 1.0,
             "current_live_score": 0,
             "trend_signature": (),

@@ -626,7 +626,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/boss">老板总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">主播大字提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/boss">经营总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">AI 数据提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -769,31 +769,31 @@ def _render_live_console() -> str:
     .quick-actions .ghost { background: #e7efeb; color: var(--accent); }
     .toast { color: var(--accent); font-weight: 900; min-height: 20px; }
     .sticky-action { position: sticky; bottom: 12px; z-index: 4; margin-top: 14px; border: 1px solid rgba(12, 107, 88, .24); box-shadow: 0 14px 40px rgba(22, 33, 31, .14); }
-    .boss-alert { display: none; border: 2px solid var(--danger); background: #fff1f2; color: var(--danger); border-radius: 10px; padding: 14px; margin-bottom: 14px; font-size: 22px; font-weight: 950; }
+    .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .boss-alert button { background: var(--danger); color: #fff; white-space: nowrap; }
+    .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <div><h1>主播实时控制台</h1><div class="small">只看未来 10-30 秒该做什么</div></div>
+      <div><h1>AI 数据指挥台</h1><div class="small">主线由实时数据自动决策；人工提醒只做辅助</div></div>
       <div>
         <span class="mode-toggle"><button id="mode-real" type="button" class="active">真实</button><button id="mode-demo" type="button">演示</button></span>
         <span class="status" id="connection-status">等待插件数据...</span><a href="/live/prompter" style="margin-left:12px;">大字提词器</a><a href="/" style="margin-left:12px;">返回选品</a>
       </div>
     </header>
     <section class="boss-alert" id="boss-alert">
-      <div id="boss-alert-message">等待老板指令</div>
-      <button id="boss-alert-ack" type="button">收到，马上做</button>
+      <div id="boss-alert-message">等待人工提醒</div>
+      <button id="boss-alert-ack" type="button">收到</button>
     </section>
     <section class="layout">
       <div>
         <section class="panel hero">
-          <span class="label">Current action</span>
+          <span class="label">AI Data Decision</span>
           <div class="action" id="current-action">等待数据</div>
-          <span class="label">Next sentence</span>
+          <span class="label">Data-based next sentence</span>
           <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
           <div class="reason" id="reason">--</div>
           <div class="quick-actions">
@@ -1146,7 +1146,7 @@ def _render_live_console() -> str:
           source: "host_console"
         })
       }).catch(() => {});
-      showHostToast("已记录执行，老板复盘能看到。");
+      showHostToast("已记录执行，后台复盘能看到。");
     }
     function showHostToast(message) {
       const node = document.getElementById("host-toast");
@@ -1170,7 +1170,7 @@ def _render_live_console() -> str:
         return;
       }
       window.__bossInterventionMessage = intervention.message;
-      if (messageNode) messageNode.textContent = "老板提醒：" + intervention.message;
+      if (messageNode) messageNode.textContent = "人工提醒：" + intervention.message;
       alert.classList.add("show");
     }
     async function ackBossIntervention() {
@@ -1184,7 +1184,7 @@ def _render_live_console() -> str:
       window.__bossInterventionMessage = "";
       const alert = document.getElementById("boss-alert");
       if (alert) alert.classList.remove("show");
-      toast("已确认老板指令");
+      toast("已确认人工提醒");
     }
     function setCheck(id, done) {
       const node = document.getElementById(id);
@@ -1235,7 +1235,7 @@ def _render_live_prompter() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>主播大字提词器</title>
+  <title>AI 数据提词器</title>
   <style>
     :root { color-scheme: dark; --bg: #070b0a; --panel: #101816; --ink: #f6faf8; --muted: #9fb0aa; --line: #24322f; --good: #34d399; --warn: #fbbf24; --danger: #fb7185; --accent: #5eead4; }
     * { box-sizing: border-box; }
@@ -1274,9 +1274,9 @@ def _render_live_prompter() -> str:
     .prompter-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .prompter-actions .ghost { background: #14201d; color: var(--accent); }
     .toast { color: var(--accent); font-weight: 950; min-height: 22px; font-size: 18px; }
-    .boss-alert { display: none; border: 2px solid var(--danger); background: rgba(251, 113, 133, .14); color: #fecdd3; border-radius: 14px; padding: 18px; margin-bottom: 16px; font-size: clamp(28px, 4vw, 56px); font-weight: 1000; line-height: 1.08; }
+    .boss-alert { display: none; border: 1px solid rgba(251, 191, 36, .36); background: rgba(251, 191, 36, .10); color: #fde68a; border-radius: 14px; padding: 14px; margin-bottom: 16px; font-size: clamp(20px, 2.4vw, 34px); font-weight: 950; line-height: 1.12; }
     .boss-alert.show { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
-    .boss-alert button { background: #fecdd3; color: #5f0f1d; border: 0; white-space: nowrap; font-size: 18px; font-weight: 950; }
+    .boss-alert button { background: #fde68a; color: #713f12; border: 0; white-space: nowrap; font-size: 16px; font-weight: 950; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1285,24 +1285,24 @@ def _render_live_prompter() -> str:
   <main>
     <header>
       <div>
-        <h1>主播大字提词器</h1>
-        <div class="tiny">开播时只看这一屏：当前动作、下一句话、是否该切品。</div>
+        <h1>AI 数据提词器</h1>
+        <div class="tiny">开播时只看这一屏：系统根据实时数据给当前动作和下一句话。</div>
       </div>
       <div class="topbar">
         <span class="pill" id="source-pill">等待数据</span>
         <a href="/live">主播控制台</a>
-        <a href="/boss">老板看板</a>
+        <a href="/boss">经营看板</a>
       </div>
     </header>
     <section class="boss-alert" id="boss-alert">
-      <div id="boss-alert-message">等待老板指令</div>
-      <button id="boss-alert-ack" type="button">收到，马上做</button>
+      <div id="boss-alert-message">等待人工提醒</div>
+      <button id="boss-alert-ack" type="button">收到</button>
     </section>
     <section class="stage">
       <section class="main-card">
-        <span class="label">Current action</span>
+        <span class="label">AI Data Decision</span>
         <div class="action" id="prompter-action">等待真实数据</div>
-        <span class="label">Next sentence</span>
+        <span class="label">Data-based next sentence</span>
         <div class="sentence" id="prompter-sentence">打开淘宝直播中控页，确认插件正在捕获实时数据。</div>
         <div class="reason" id="prompter-reason">没有真实指标时，这里不会给主播乱下指令。</div>
         <div class="prompter-actions">
@@ -1543,7 +1543,7 @@ def _render_live_prompter() -> str:
         return;
       }
       window.__bossInterventionMessage = intervention.message;
-      if (messageNode) messageNode.textContent = "老板提醒：" + intervention.message;
+      if (messageNode) messageNode.textContent = "人工提醒：" + intervention.message;
       alert.classList.add("show");
     }
     async function ackBossIntervention() {
@@ -1557,7 +1557,7 @@ def _render_live_prompter() -> str:
       window.__bossInterventionMessage = "";
       const alert = document.getElementById("boss-alert");
       if (alert) alert.classList.remove("show");
-      toast("已确认老板指令");
+      toast("已确认人工提醒");
     }
     document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
     document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
@@ -1610,7 +1610,7 @@ def _render_install_guide() -> str:
       <h1>Chrome 插件安装教程</h1>
       <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.2</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化；主播可在插件里填写老板/门店绑定码。</p>
       <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
-      <p><a href="/live">打开主播控制台</a> · <a href="/live/prompter">打开主播大字提词器</a> · <a href="/">返回首页</a></p>
+      <p><a href="/live">打开主播控制台</a> · <a href="/live/prompter">打开 AI 数据提词器</a> · <a href="/">返回首页</a></p>
     </div>
     <div class="steps">
       <section class="step"><div><h2>下载并解压插件包</h2><p>点击上方下载，得到 zip 文件后先解压成文件夹。不要直接选择 zip。</p></div></section>
@@ -1844,7 +1844,7 @@ def _render_boss_dashboard() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>老板总控看板</title>
+  <title>经营总控看板</title>
   <style>
     :root { color-scheme: light; --ink: #111827; --muted: #66736f; --line: #d8e1dd; --paper: #f5f8f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; --warn: #a16207; --danger: #b42318; }
     * { box-sizing: border-box; }
@@ -1870,7 +1870,8 @@ def _render_boss_dashboard() -> str:
     .button { display: inline-flex; border-radius: 8px; background: var(--accent); color: #fff; padding: 7px 9px; }
     .workspace-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 14px; }
     .intervention-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-    .intervention-buttons button { padding: 7px 8px; font-size: 12px; background: #e7efeb; color: var(--accent); }
+    .intervention-buttons:before { content: "人工提醒"; color: var(--muted); font-size: 12px; font-weight: 900; width: 100%; }
+    .intervention-buttons button { padding: 7px 8px; font-size: 12px; background: #f3f7f5; color: var(--accent); border: 1px solid var(--line); }
     input, select { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fff; min-width: 0; }
     button { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 12px; font-weight: 900; cursor: pointer; }
     @media (max-width: 900px) { .kpis, .layout { grid-template-columns: 1fr; } header { display: block; } }
@@ -1880,7 +1881,7 @@ def _render_boss_dashboard() -> str:
 <body>
   <main>
     <header>
-      <div><h1>老板总控看板</h1><div class="small">实时看钱、看风险、看主播执行力</div></div>
+      <div><h1>经营总控看板</h1><div class="small">老板看大盘、看风险、看异常；主播主线由实时数据自动指挥</div></div>
       <div><a href="/admin/live">直播监控后台</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
     </header>
     <section class="workspace-bar">
@@ -1896,7 +1897,7 @@ def _render_boss_dashboard() -> str:
     </section>
     <section class="layout">
       <div class="panel">
-        <h2>老板需要关注</h2>
+        <h2>系统自动预警</h2>
         <div id="risk-list"><div class="small">等待数据...</div></div>
       </div>
       <div class="panel">
@@ -1905,7 +1906,7 @@ def _render_boss_dashboard() -> str:
       </div>
     </section>
     <section class="panel" style="margin-top:14px;">
-      <h2>主播执行评分</h2>
+      <h2>直播间表现与执行</h2>
       <div class="table-wrap">
         <table>
           <thead><tr><th>直播间</th><th>评分</th><th>执行</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>最新动作</th><th>操作</th></tr></thead>
@@ -1958,11 +1959,11 @@ def _render_boss_dashboard() -> str:
       node.innerHTML = rooms.map((room) => {
         const url = "/admin/live/" + encodeURIComponent(room.host_id);
         const feedback = fmtNumber(room.host_feedback_count_5m) + '次 / 5m' + (room.last_host_feedback_action ? '<div class="small">' + escapeHtml(room.last_host_feedback_action) + '</div>' : '');
-        const pending = room.pending_boss_intervention ? '<div class="small" style="color:#9f2f22;font-weight:950;">待主播确认：' + escapeHtml(room.boss_intervention_message || "") + '</div>' : '<div class="small">老板指令：已同步</div>';
+        const pending = room.pending_boss_intervention ? '<div class="small" style="color:#a16207;font-weight:950;">待确认人工提醒：' + escapeHtml(room.boss_intervention_message || "") + '</div>' : '<div class="small">人工提醒：无待处理</div>';
         const buttons = '<div class="intervention-buttons">'
-          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="开始讲尺码，直接回答身高体重。">讲尺码</button>'
-          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="解释价格价值，别急着换款。">讲价格</button>'
-          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="当前款收口，准备切下一件。">切品</button>'
+          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="评论区尺码问题多，补一句身高体重建议。">提醒尺码</button>'
+          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="高点击低成交，补一句价格价值。">提醒价格</button>'
+          + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="数据开始下滑，注意准备切下一件。">提醒切品</button>'
           + '</div>';
         return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + pending + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a>' + buttons + '</td></tr>';
       }).join("");
