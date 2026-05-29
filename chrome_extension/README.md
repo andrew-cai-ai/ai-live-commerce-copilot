@@ -8,24 +8,33 @@ It does not collect cookies, request headers, or authentication data.
 
 ## Cloud setup for hosts
 
-The extension sends live metrics to the Render app first:
+By default, the extension sends live metrics to local development first:
+
+- `POST http://localhost:8000/api/live-ingest`
+- `POST http://127.0.0.1:8000/api/live-ingest`
+
+For a host using the cloud app, enter the cloud base URL in the extension popup:
+
+```text
+https://ai-live-commerce-copilot.onrender.com
+```
+
+After that, the extension sends to:
 
 `POST https://ai-live-commerce-copilot.onrender.com/api/live-ingest`
 
 If the backend sets `LIVE_INGEST_TOKEN`, enter the same token in the extension popup. The connector sends it as `X-Live-Ingest-Token`.
-
-If cloud posting fails, it falls back to local development endpoints:
-
-- `POST http://localhost:8000/api/live-ingest`
-- `POST http://127.0.0.1:8000/api/live-ingest`
 
 Host workflow:
 
 1. Install this folder with Chrome `Load unpacked`.
 2. Open the cloud app and log in:
    `https://ai-live-commerce-copilot.onrender.com`
-3. Open the Taobao live backend realtime data page while logged in.
-4. Click the extension icon and confirm:
+3. Click the extension icon and set:
+   - API 地址: `https://ai-live-commerce-copilot.onrender.com`
+   - Ingest Token: the same value as `LIVE_INGEST_TOKEN`
+4. Open the Taobao live backend realtime data page while logged in.
+5. Click the extension icon and confirm:
    `Content script = yes`, `Page hook = yes`, `Target API captured = yes`, `Sent to app = yes`.
 
 ## Local setup
@@ -50,9 +59,9 @@ Host workflow:
 
 6. Open the Taobao live backend page while logged in.
 
-The extension will send normalized live metrics every 5 seconds to cloud first, then local fallback:
+The extension will send normalized live metrics every 5 seconds to local first unless API 地址 is configured.
 
-`POST https://ai-live-commerce-copilot.onrender.com/api/live-ingest`
+`POST http://localhost:8000/api/live-ingest`
 
 Request body:
 

@@ -214,7 +214,10 @@ Use this instead of sending the extension through Gmail, which may block extensi
 3. Turn on Developer Mode.
 4. Click Load unpacked.
 5. Choose the unzipped extension folder.
-6. Open `liveplatform.taobao.com` during a real live session and click the extension.
+6. For cloud usage, open the extension popup and set:
+   - API 地址: your cloud app base URL, for example `https://ai-live-commerce-copilot.onrender.com`
+   - Ingest Token: the same value configured as `LIVE_INGEST_TOKEN`
+7. Open `liveplatform.taobao.com` during a real live session and click the extension.
 
 The connector tags each stream with `host_id/liveId`. The report page can auto-use the only active stream, or you can set the `Live room / host ID` field manually when multiple hosts are live.
 

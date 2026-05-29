@@ -1,4 +1,6 @@
 import os
+import io
+import zipfile
 import unittest
 
 from fastapi.testclient import TestClient
@@ -93,6 +95,18 @@ class ModelApiTests(unittest.TestCase):
                 os.environ.pop("LIVE_INGEST_TOKEN", None)
             else:
                 os.environ["LIVE_INGEST_TOKEN"] = previous
+
+    def test_chrome_extension_download_contains_required_files(self) -> None:
+        response = self.client.get("/download/chrome-extension")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = set(archive.namelist())
+        self.assertIn("manifest.json", names)
+        self.assertIn("content.js", names)
+        self.assertIn("page_hook.js", names)
+        self.assertIn("popup.html", names)
+        self.assertFalse(any("__pycache__" in name for name in names))
 
 
 if __name__ == "__main__":
