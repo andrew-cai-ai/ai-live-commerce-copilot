@@ -177,6 +177,7 @@ class LiveDataConnector:
             row_workspace_id = _workspace_id_from_session_key(host_id, session.latest_ingested_payload)
             if workspace_filter and row_workspace_id != workspace_filter:
                 continue
+            feedback_stats = _host_feedback_stats(session.action_history)
             rows.append({
                 "host_id": host_id,
                 "workspace_id": row_workspace_id,
@@ -194,6 +195,11 @@ class LiveDataConnector:
                 ),
                 "valid_live_metrics": _has_valid_live_metrics(latest_snapshot) if latest_snapshot else False,
                 "current_action": latest_action.get("decision", ""),
+                "host_feedback_count_5m": feedback_stats["count_5m"],
+                "host_feedback_total": feedback_stats["total"],
+                "last_host_feedback_at": feedback_stats["last_at"],
+                "last_host_feedback_action": feedback_stats["last_action"],
+                "last_host_feedback_sentence": feedback_stats["last_sentence"],
                 "current_product": latest_snapshot.current_product if latest_snapshot else "",
                 "online_uv": latest_snapshot.online_uv if latest_snapshot else 0,
                 "total_viewers": (latest_snapshot.total_live_viewers or latest_snapshot.uv) if latest_snapshot else 0,
@@ -881,6 +887,11 @@ def _boss_room_card(session: dict[str, Any]) -> dict[str, Any]:
         "cvr": float(session.get("pay_byr_rate") or 0),
         "current_action": session.get("current_action") or "--",
         "current_product": session.get("current_product") or "--",
+        "host_feedback_count_5m": int(session.get("host_feedback_count_5m") or 0),
+        "host_feedback_total": int(session.get("host_feedback_total") or 0),
+        "last_host_feedback_at": float(session.get("last_host_feedback_at") or 0),
+        "last_host_feedback_action": session.get("last_host_feedback_action") or "",
+        "last_host_feedback_sentence": session.get("last_host_feedback_sentence") or "",
         "execution_score": score,
         "age_seconds": session.get("age_seconds"),
         "extension_update_available": bool(session.get("extension_update_available")),
@@ -915,6 +926,10 @@ def _boss_risk_card(session: dict[str, Any]) -> dict[str, Any]:
         level = "medium"
         reason = "主播插件不是最新版"
         action = "下播后让主播重新下载安装插件"
+    elif float(session.get("online_uv") or 0) >= 20 and int(session.get("host_feedback_count_5m") or 0) <= 0:
+        level = "medium"
+        reason = "主播 5 分钟内没有标记执行 AI 建议"
+        action = "提醒主播点“我已照做”，方便复盘执行力"
     elif ctr < 0.03 and online_uv > 20:
         level = "medium"
         reason = "点击偏低，商品开场吸引力不足"
@@ -946,11 +961,32 @@ def _host_execution_score(session: dict[str, Any]) -> int:
         score -= 12
     if heat >= 500:
         score += 6
+    feedback_count = int(session.get("host_feedback_count_5m") or 0)
+    if feedback_count >= 3:
+        score += 10
+    elif feedback_count >= 1:
+        score += 5
+    elif float(session.get("online_uv") or 0) >= 20:
+        score -= 8
     if age > 60:
         score -= 15
     if session.get("extension_update_available"):
         score -= 4
     return max(0, min(100, score))
+
+
+def _host_feedback_stats(actions: list[dict[str, Any]]) -> dict[str, Any]:
+    now = time.time()
+    feedback = [action for action in actions if action.get("event_type") == "host_feedback"]
+    recent = [action for action in feedback if now - float(action.get("timestamp") or 0) <= 300]
+    last = feedback[-1] if feedback else {}
+    return {
+        "count_5m": len(recent),
+        "total": len(feedback),
+        "last_at": float(last.get("timestamp") or 0),
+        "last_action": " / ".join(str(item) for item in (last.get("reason") or []) if item)[:120],
+        "last_sentence": str(last.get("next_action") or "")[:160],
+    }
 
 
 def _session_age(session: dict[str, Any]) -> float:

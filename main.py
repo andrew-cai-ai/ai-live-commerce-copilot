@@ -1789,8 +1789,8 @@ def _render_boss_dashboard() -> str:
       <h2>主播执行评分</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>直播间</th><th>评分</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>最新动作</th><th>操作</th></tr></thead>
-          <tbody id="room-rows"><tr><td colspan="8">等待数据...</td></tr></tbody>
+          <thead><tr><th>直播间</th><th>评分</th><th>执行</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>最新动作</th><th>操作</th></tr></thead>
+          <tbody id="room-rows"><tr><td colspan="9">等待数据...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -1831,14 +1831,15 @@ def _render_boss_dashboard() -> str:
     function renderTopRoom(room) {
       const node = document.getElementById("top-room");
       if (!room) { node.textContent = "等待数据..."; return; }
-      node.innerHTML = '<h3>' + escapeHtml(room.display_name || room.host_id) + '</h3><p>当前 GMV：<b>' + fmtMoney(room.pay_amt) + '</b></p><p>在线：' + fmtNumber(room.online_uv) + ' · CTR ' + fmtPercent(room.ipv_uv_rate) + ' · CVR ' + fmtPercent(room.pay_byr_rate) + '</p>';
+      node.innerHTML = '<h3>' + escapeHtml(room.display_name || room.host_id) + '</h3><p>当前 GMV：<b>' + fmtMoney(room.pay_amt) + '</b></p><p>在线：' + fmtNumber(room.online_uv) + ' · CTR ' + fmtPercent(room.ipv_uv_rate) + ' · CVR ' + fmtPercent(room.pay_byr_rate) + '</p><p class="small">近 5 分钟执行：' + fmtNumber(room.host_feedback_count_5m) + ' 次</p>';
     }
     function renderRooms(rooms) {
       const node = document.getElementById("room-rows");
-      if (!rooms.length) { node.innerHTML = '<tr><td colspan="8">等待数据...</td></tr>'; return; }
+      if (!rooms.length) { node.innerHTML = '<tr><td colspan="9">等待数据...</td></tr>'; return; }
       node.innerHTML = rooms.map((room) => {
         const url = "/admin/live/" + encodeURIComponent(room.host_id);
-        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a></td></tr>';
+        const feedback = fmtNumber(room.host_feedback_count_5m) + '次 / 5m' + (room.last_host_feedback_action ? '<div class="small">' + escapeHtml(room.last_host_feedback_action) + '</div>' : '');
+        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a></td></tr>';
       }).join("");
     }
     document.getElementById("apply-workspace").addEventListener("click", () => {
