@@ -726,9 +726,9 @@ def _render_live_console() -> str:
     h1 { margin: 0; font-size: 24px; }
     a { color: var(--accent); font-weight: 800; text-decoration: none; }
     .status { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 900; }
-    .layout { display: grid; grid-template-columns: 1.25fr .85fr; gap: 14px; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-    .hero { border: 2px solid var(--accent); background: #f2f8f5; min-height: 360px; display: grid; align-content: center; gap: 14px; }
+    .hero { border: 2px solid var(--accent); background: #f2f8f5; min-height: 430px; display: grid; align-content: center; gap: 16px; }
     .label { display: block; color: var(--muted); font-size: 13px; font-weight: 900; text-transform: uppercase; letter-spacing: 0; }
     .action { font-size: clamp(34px, 6vw, 72px); line-height: 1.02; color: var(--accent); font-weight: 950; }
     .sentence { font-size: clamp(24px, 4vw, 44px); line-height: 1.18; font-weight: 950; }
@@ -736,7 +736,7 @@ def _render_live_console() -> str:
     .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-height: 96px; }
     .card b { display: block; font-size: 28px; margin-top: 4px; overflow-wrap: anywhere; }
-    .side { display: grid; gap: 14px; align-content: start; }
+    .side { display: grid; gap: 10px; align-content: start; }
     .host-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
     input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fbfdfb; }
     button { border: 0; border-radius: 8px; padding: 10px 12px; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; }
@@ -765,14 +765,23 @@ def _render_live_console() -> str:
     .product-cards { display: grid; gap: 8px; margin-top: 10px; }
     .product-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
     .product-card b { display: block; }
-    .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .quick-actions .ghost { background: #e7efeb; color: var(--accent); }
+    .primary-action { font-size: 22px; padding: 16px 20px; min-width: 220px; }
+    .secondary-action { background: #e7efeb; color: var(--accent); }
     .toast { color: var(--accent); font-weight: 900; min-height: 20px; }
     .sticky-action { position: sticky; bottom: 12px; z-index: 4; margin-top: 14px; border: 1px solid rgba(12, 107, 88, .24); box-shadow: 0 14px 40px rgba(22, 33, 31, .14); }
+    details.panel { padding: 0; overflow: hidden; }
+    details.panel > summary { list-style: none; cursor: pointer; padding: 14px 16px; font-weight: 950; color: var(--accent); display: flex; justify-content: space-between; gap: 10px; }
+    details.panel > summary::-webkit-details-marker { display: none; }
+    details.panel > summary:after { content: "展开"; color: var(--muted); font-size: 13px; }
+    details.panel[open] > summary:after { content: "收起"; }
+    details.panel > .panel-body { padding: 0 16px 16px; }
+    .operator-note { border: 1px solid rgba(12, 107, 88, .18); background: #eef8f3; color: var(--accent); border-radius: 10px; padding: 12px; font-weight: 900; }
     .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
-    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
+    @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
   </style>
 </head>
 <body>
@@ -797,74 +806,65 @@ def _render_live_console() -> str:
           <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
           <div class="reason" id="reason">--</div>
           <div class="quick-actions">
-            <button id="copy-sentence" type="button">复制下一句</button>
-            <button id="mark-executed" type="button" class="ghost">标记已执行</button>
-            <span class="small">快捷键：C 复制 · E 标记执行</span>
+            <button id="mark-executed" type="button" class="primary-action">我已照做，给下一步</button>
+            <button id="copy-sentence" type="button" class="secondary-action">复制话术</button>
+            <span class="small">主播只需要：照着念，做完点绿色按钮。快捷键：E 执行 · C 复制</span>
           </div>
           <div class="toast" id="host-toast"></div>
         </section>
         <section class="cards">
-          <div class="card"><span class="label">当前直播间</span><b id="host-id-label">default</b></div>
-          <div class="card"><span class="label">总观看</span><b id="viewer-count">--</b></div>
           <div class="card"><span class="label">在线</span><b id="online-uv">--</b></div>
           <div class="card"><span class="label">GMV</span><b id="pay-amt">--</b></div>
           <div class="card"><span class="label">热度</span><b id="heat-score">--</b></div>
-          <div class="card"><span class="label">CTR</span><b id="ctr">--</b></div>
-          <div class="card"><span class="label">CVR</span><b id="cvr">--</b></div>
-          <div class="card"><span class="label">停留</span><b id="watch-time">--</b></div>
-        </section>
-        <section class="timer" id="product-timer">
-          <span class="label">当前商品讲解时长</span>
-          <b id="product-elapsed">00:00</b>
-          <div class="small" id="product-timer-hint">切换商品后自动重新计时。</div>
+          <div class="card" id="product-timer"><span class="label">当前商品时长</span><b id="product-elapsed">00:00</b></div>
         </section>
         <section class="panel sticky-action">
           <span class="label">主播操作台</span>
           <div class="quick-actions">
-            <button id="copy-sentence-sticky" type="button">复制话术</button>
-            <button id="mark-executed-sticky" type="button" class="ghost">我已照做</button>
+            <button id="mark-executed-sticky" type="button">我已照做，刷新下一步</button>
+            <button id="copy-sentence-sticky" type="button" class="ghost">复制话术</button>
             <a href="/live/prompter" id="prompter-link">打开大字屏</a>
           </div>
-          <div class="small">主播只需要：照着下一句讲，讲完点“我已照做”。</div>
+          <div class="small" id="product-timer-hint">讲解节奏正常。</div>
         </section>
       </div>
       <div class="side">
-        <section class="panel">
-          <span class="label">连接直播间</span>
-          <div class="host-input"><input id="host-id-input" placeholder="default 或 liveId"><button id="save-host">连接</button></div>
-          <div class="rooms" id="active-rooms"></div>
-          <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
-        </section>
-        <section class="panel">
-          <span class="label">场次备注</span>
-          <input id="session-name" placeholder="场次名，例如：5月28晚场">
-          <input id="host-name" placeholder="主播，例如：Gigi" style="margin-top:8px;">
-          <input id="target-gmv" placeholder="目标 GMV，例如：50000" style="margin-top:8px;">
-          <button id="save-session-meta" type="button" style="margin-top:8px;">保存场次信息</button>
-        </section>
-        <section class="panel">
-          <span class="label">开播前 Checklist</span>
-          <div class="checklist">
-            <div class="check" id="check-mode"><i>1</i><span>选择真实/演示模式</span></div>
-            <div class="check" id="check-connector"><i>2</i><span>插件或演示数据已连接</span></div>
-            <div class="check" id="check-products"><i>3</i><span>商品队列已填写</span></div>
-            <div class="check" id="check-comments"><i>4</i><span>评论助手可用</span></div>
-            <div class="check" id="check-action"><i>5</i><span>已生成下一步动作</span></div>
+        <details class="panel" open>
+          <summary>运营连接与商品队列</summary>
+          <div class="panel-body">
+            <div class="operator-note">主播不用管这里。运营只在开播前连接房间、粘贴商品队列。</div>
+            <div class="host-input" style="margin-top:10px;"><input id="host-id-input" placeholder="default 或 liveId"><button id="save-host">连接</button></div>
+            <div class="rooms" id="active-rooms"></div>
+            <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
+            <input id="session-name" placeholder="场次名，例如：5月28晚场" style="margin-top:10px;">
+            <input id="host-name" placeholder="主播，例如：Gigi" style="margin-top:8px;">
+            <input id="target-gmv" placeholder="目标 GMV，例如：50000" style="margin-top:8px;">
+            <button id="save-session-meta" type="button" style="margin-top:8px;">保存场次信息</button>
+            <textarea class="comments" id="product-list" placeholder="每行一个商品；可用 | 分隔价格和卖点&#10;Kragg Shirt | ¥499 | 特价T恤，适合通勤&#10;Atom Jacket | ¥1709 | 日常保暖" style="margin-top:10px;"></textarea>
+            <div class="product-cards" id="product-cards"></div>
+            <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div>
           </div>
-        </section>
-        <section class="panel">
-          <span class="label">推荐商品队列</span>
-          <textarea class="comments" id="product-list" placeholder="每行一个商品；可用 | 分隔价格和卖点&#10;Kragg Shirt | ¥499 | 特价T恤，适合通勤&#10;Atom Jacket | ¥1709 | 日常保暖"></textarea>
-          <div class="small">会参与“推荐下一件”决策，保存在本机浏览器。</div>
-          <div class="product-cards" id="product-cards"></div>
-          <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div>
-        </section>
-        <section class="panel">
-          <span class="label">观众问题助手</span>
-          <textarea class="comments" id="comments" placeholder="粘贴评论，例如：175 70kg穿啥&#10;真的假的&#10;黑色有吗"></textarea>
-          <div id="comment-replies"></div>
-        </section>
-        <section class="panel"><span class="label">AI Director Timeline</span><div class="timeline" id="timeline"><div class="timeline-item">等待实时动作...</div></div></section>
+        </details>
+        <details class="panel">
+          <summary>观众问题助手</summary>
+          <div class="panel-body">
+            <textarea class="comments" id="comments" placeholder="粘贴评论，例如：175 70kg穿啥&#10;真的假的&#10;黑色有吗"></textarea>
+            <div id="comment-replies"></div>
+          </div>
+        </details>
+        <details class="panel">
+          <summary>更多指标与时间线</summary>
+          <div class="panel-body">
+            <section class="cards" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top:0;">
+              <div class="card"><span class="label">当前直播间</span><b id="host-id-label">default</b></div>
+              <div class="card"><span class="label">总观看</span><b id="viewer-count">--</b></div>
+              <div class="card"><span class="label">CTR</span><b id="ctr">--</b></div>
+              <div class="card"><span class="label">CVR</span><b id="cvr">--</b></div>
+              <div class="card"><span class="label">停留</span><b id="watch-time">--</b></div>
+            </section>
+            <div class="timeline" id="timeline" style="margin-top:10px;"><div class="timeline-item">等待实时动作...</div></div>
+          </div>
+        </details>
       </div>
     </section>
   </main>
@@ -1147,6 +1147,7 @@ def _render_live_console() -> str:
         })
       }).catch(() => {});
       showHostToast("已记录执行，后台复盘能看到。");
+      window.setTimeout(refreshDecision, 300);
     }
     function showHostToast(message) {
       const node = document.getElementById("host-toast");
