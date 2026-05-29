@@ -160,16 +160,20 @@ class LiveDataConnector:
         self.latest_ingested_at = time.time()
         return self.get_decision(payload=self.latest_ingested_payload, host_id=host_id)
 
-    def active_sessions(self) -> list[dict[str, Any]]:
+    def active_sessions(self, workspace_id: str | None = None) -> list[dict[str, Any]]:
+        workspace_filter = _clean_workspace_id(workspace_id) if workspace_id else ""
         now = time.time()
         rows = []
         for host_id, session in self.sessions.items():
             latest_snapshot = session.snapshots[-1] if session.snapshots else None
             latest_action = session.action_history[-1] if session.action_history else {}
             display_name = _session_display_name(host_id, session.metadata)
+            row_workspace_id = _workspace_id_from_session_key(host_id, session.latest_ingested_payload)
+            if workspace_filter and row_workspace_id != workspace_filter:
+                continue
             rows.append({
                 "host_id": host_id,
-                "workspace_id": _workspace_id_from_session_key(host_id, session.latest_ingested_payload),
+                "workspace_id": row_workspace_id,
                 "display_name": display_name,
                 "metadata": dict(session.metadata),
                 "live_id": _pick(session.latest_ingested_payload or {}, "liveId", "live_id", "room_id") or host_id,
@@ -225,13 +229,16 @@ class LiveDataConnector:
             ),
         }
 
-    def boss_dashboard(self) -> dict[str, Any]:
-        sessions = self.active_sessions()
+    def boss_dashboard(self, workspace_id: str | None = None) -> dict[str, Any]:
+        clean_workspace_id = _clean_workspace_id(workspace_id) if workspace_id else ""
+        sessions = self.active_sessions(workspace_id=clean_workspace_id or None)
         active = [session for session in sessions if _session_age(session) <= 120]
         risks = [_boss_risk_card(session) for session in active]
         risks = [risk for risk in risks if risk["level"] != "ok"]
         ranked = sorted(active, key=lambda item: float(item.get("pay_amt") or 0), reverse=True)
         return {
+            "workspace_id": clean_workspace_id or "all",
+            "workspace_options": self.workspace_options(),
             "active_count": len(active),
             "valid_count": len([session for session in active if session.get("valid_live_metrics")]),
             "total_gmv": sum(float(session.get("pay_amt") or 0) for session in active),
@@ -240,6 +247,13 @@ class LiveDataConnector:
             "risk_rooms": risks[:8],
             "rooms": [_boss_room_card(session) for session in active[:20]],
         }
+
+    def workspace_options(self) -> list[str]:
+        workspaces = {
+            _workspace_id_from_session_key(host_id, session.latest_ingested_payload)
+            for host_id, session in self.sessions.items()
+        }
+        return sorted(workspace for workspace in workspaces if workspace)
 
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
         clean_host_id = _clean_host_id(host_id)

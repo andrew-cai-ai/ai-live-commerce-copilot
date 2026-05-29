@@ -144,10 +144,10 @@ def boss_dashboard(request: Request) -> str:
 
 
 @app.get("/api/boss/dashboard")
-async def boss_dashboard_api(request: Request) -> dict[str, Any]:
+async def boss_dashboard_api(request: Request, workspace_id: str = "") -> dict[str, Any]:
     if not is_authenticated(request):
         return {"error": "unauthorized"}
-    return live_data_connector.boss_dashboard()
+    return live_data_connector.boss_dashboard(workspace_id=workspace_id or None)
 
 
 @app.get("/admin/live/{host_id}", response_class=HTMLResponse)
@@ -239,10 +239,10 @@ async def live_decision(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/live/sessions")
-async def live_sessions(request: Request) -> dict[str, Any]:
+async def live_sessions(request: Request, workspace_id: str = "") -> dict[str, Any]:
     if not is_authenticated(request):
         return {"error": "unauthorized"}
-    return {"sessions": live_data_connector.active_sessions()}
+    return {"sessions": live_data_connector.active_sessions(workspace_id=workspace_id or None)}
 
 
 @app.get("/api/live/history")
@@ -1520,7 +1520,11 @@ def _render_boss_dashboard() -> str:
     .table-wrap { overflow-x: auto; }
     .score { font-weight: 950; color: var(--accent); }
     .button { display: inline-flex; border-radius: 8px; background: var(--accent); color: #fff; padding: 7px 9px; }
+    .workspace-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; margin-bottom: 14px; }
+    input, select { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fff; min-width: 0; }
+    button { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 12px; font-weight: 900; cursor: pointer; }
     @media (max-width: 900px) { .kpis, .layout { grid-template-columns: 1fr; } header { display: block; } }
+    @media (max-width: 720px) { .workspace-bar { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -1529,6 +1533,11 @@ def _render_boss_dashboard() -> str:
       <div><h1>老板总控看板</h1><div class="small">实时看钱、看风险、看主播执行力</div></div>
       <div><a href="/admin/live">直播监控后台</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
     </header>
+    <section class="workspace-bar">
+      <input id="workspace-input" placeholder="输入老板/门店绑定码；留空查看全部">
+      <select id="workspace-select"><option value="">全部工作区</option></select>
+      <button id="apply-workspace" type="button">切换工作区</button>
+    </section>
     <section class="kpis">
       <div class="card"><span>在线直播间</span><b id="active-count">--</b></div>
       <div class="card"><span>有效数据</span><b id="valid-count">--</b></div>
@@ -1556,13 +1565,17 @@ def _render_boss_dashboard() -> str:
     </section>
   </main>
   <script>
+    const params = new URLSearchParams(location.search);
+    let workspaceId = params.get("workspace_id") || "";
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
     function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
     async function refresh() {
-      const response = await fetch("/api/boss/dashboard");
+      const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
+      const response = await fetch("/api/boss/dashboard" + query);
       const data = await response.json();
+      renderWorkspaceOptions(data.workspace_options || []);
       document.getElementById("active-count").textContent = fmtNumber(data.active_count);
       document.getElementById("valid-count").textContent = fmtNumber(data.valid_count);
       document.getElementById("total-gmv").textContent = fmtMoney(data.total_gmv);
@@ -1570,6 +1583,14 @@ def _render_boss_dashboard() -> str:
       renderRisks(data.risk_rooms || []);
       renderTopRoom(data.top_room);
       renderRooms(data.rooms || []);
+    }
+    function renderWorkspaceOptions(options) {
+      const input = document.getElementById("workspace-input");
+      const select = document.getElementById("workspace-select");
+      if (document.activeElement !== input) input.value = workspaceId;
+      const unique = Array.from(new Set(options.filter(Boolean)));
+      const all = ["", ...unique.filter((item) => item !== "default")];
+      select.innerHTML = all.map((item) => '<option value="' + escapeHtml(item) + '"' + (item === workspaceId ? " selected" : "") + '>' + (item ? escapeHtml(item) : "全部工作区") + '</option>').join("");
     }
     function renderRisks(risks) {
       const node = document.getElementById("risk-list");
@@ -1586,9 +1607,20 @@ def _render_boss_dashboard() -> str:
       if (!rooms.length) { node.innerHTML = '<tr><td colspan="8">等待数据...</td></tr>'; return; }
       node.innerHTML = rooms.map((room) => {
         const url = "/admin/live/" + encodeURIComponent(room.host_id);
-        return '<tr><td>' + escapeHtml(room.display_name) + '</td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a></td></tr>';
+        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a></td></tr>';
       }).join("");
     }
+    document.getElementById("apply-workspace").addEventListener("click", () => {
+      workspaceId = document.getElementById("workspace-input").value.trim();
+      history.replaceState(null, "", workspaceId ? "/boss?workspace_id=" + encodeURIComponent(workspaceId) : "/boss");
+      refresh();
+    });
+    document.getElementById("workspace-select").addEventListener("change", (event) => {
+      workspaceId = event.target.value;
+      document.getElementById("workspace-input").value = workspaceId;
+      history.replaceState(null, "", workspaceId ? "/boss?workspace_id=" + encodeURIComponent(workspaceId) : "/boss");
+      refresh();
+    });
     refresh();
     window.setInterval(refresh, 5000);
   </script>
