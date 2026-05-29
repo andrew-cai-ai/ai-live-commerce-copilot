@@ -2315,8 +2315,15 @@ def _render_admin_live_detail(host_id: str) -> str:
     .summary-box {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }}
     .summary-box h3 {{ margin: 0 0 8px; font-size: 14px; color: var(--accent); }}
     .summary-box ul {{ margin: 0; padding-left: 18px; }}
+    .learning-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }}
+    .learning-card {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }}
+    .learning-card b {{ display: block; font-size: 22px; color: var(--accent); margin-top: 4px; }}
+    .leader-row {{ display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }}
+    .leader-row:last-child {{ border-bottom: 0; }}
+    .good {{ color: var(--accent); font-weight: 900; }}
+    .bad {{ color: var(--danger); font-weight: 900; }}
     .small {{ color: var(--muted); font-size: 13px; }}
-    @media (max-width: 900px) {{ .grid, .summary-list {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} header {{ display: block; }} }}
+    @media (max-width: 900px) {{ .grid, .summary-list, .learning-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} header {{ display: block; }} }}
   </style>
 </head>
 <body>
@@ -2357,6 +2364,19 @@ def _render_admin_live_detail(host_id: str) -> str:
       <div class="small" style="margin-top:10px;">最佳时刻：<b id="summary-best">--</b> · 观察点：<b id="summary-weak">--</b></div>
     </section>
     <section class="panel">
+      <h2>AI 学习闭环</h2>
+      <div class="learning-grid">
+        <div class="learning-card"><span class="small">执行率</span><b id="execution-rate">--</b></div>
+        <div class="learning-card"><span class="small">AI 命中率</span><b id="hit-rate">--</b></div>
+        <div class="learning-card"><span class="small">导演评分</span><b id="director-score">--</b></div>
+      </div>
+      <div class="summary-list" style="margin-top:12px;">
+        <div class="summary-box"><h3>最有效动作 TOP5</h3><div id="top-actions">等待动作效果...</div></div>
+        <div class="summary-box"><h3>最差动作 TOP5</h3><div id="worst-actions">等待动作效果...</div></div>
+        <div class="summary-box"><h3>最近执行效果</h3><div id="recent-effects">等待主播点击“我已照做”...</div></div>
+      </div>
+    </section>
+    <section class="panel">
       <h2>AI 动作时间线</h2>
       <div class="timeline" id="timeline"><div class="timeline-item">等待动作...</div></div>
     </section>
@@ -2392,6 +2412,7 @@ def _render_admin_live_detail(host_id: str) -> str:
       document.getElementById("current-action").textContent = summary.current_action || "--";
       renderChart(snapshots);
       renderSummary(data.post_live_summary || {{}});
+      renderLearning(data);
       renderTimeline(data.actions || []);
       renderRows(snapshots.slice(-40).reverse());
     }}
@@ -2418,6 +2439,31 @@ def _render_admin_live_detail(host_id: str) -> str:
       renderList("summary-highlights", summary.highlights || []);
       renderList("summary-risks", summary.risks || []);
       renderList("summary-suggestions", summary.next_suggestions || []);
+    }}
+    function renderLearning(data) {{
+      const card = data.director_score_card || {{}};
+      document.getElementById("execution-rate").textContent = card.execution_rate == null ? "--" : Math.round(Number(card.execution_rate || 0) * 100) + "%";
+      document.getElementById("hit-rate").textContent = card.ai_hit_rate == null ? "等待样本" : Math.round(Number(card.ai_hit_rate || 0) * 100) + "%";
+      document.getElementById("director-score").textContent = card.score == null ? "--" : String(card.score);
+      const leaderboard = data.action_leaderboard || {{}};
+      renderLeaderRows("top-actions", leaderboard.top || [], "good");
+      renderLeaderRows("worst-actions", leaderboard.worst || [], "bad");
+      renderEffects(data.action_effects || []);
+    }}
+    function renderLeaderRows(id, rows, cls) {{
+      const node = document.getElementById(id);
+      if (!rows.length) {{ node.innerHTML = '<div class="small">等待动作效果...</div>'; return; }}
+      node.innerHTML = rows.map((row) => '<div class="leader-row"><span>' + escapeHtml(row.action || "--") + '<div class="small">' + escapeHtml(row.summary || "") + '</div></span><b class="' + cls + '">' + formatEffectScore(row.avg_score) + '</b></div>').join("");
+    }}
+    function renderEffects(rows) {{
+      const node = document.getElementById("recent-effects");
+      const visible = rows.slice(0, 5);
+      if (!visible.length) {{ node.innerHTML = '<div class="small">等待主播点击“我已照做”...</div>'; return; }}
+      node.innerHTML = visible.map((row) => '<div class="leader-row"><span>' + timeText(row.timestamp) + ' · ' + escapeHtml(row.action_label || row.reason?.[0] || "已执行") + '<div class="small">' + escapeHtml(row.effect_summary || row.effect_result || "等待 30 秒后判断") + '</div></span><b class="' + (row.effect_result === "有效" ? "good" : row.effect_result === "无效" ? "bad" : "") + '">' + escapeHtml(row.effect_result || "等待") + '</b></div>').join("");
+    }}
+    function formatEffectScore(value) {{
+      const numeric = Number(value || 0);
+      return (numeric >= 0 ? "+" : "") + numeric.toFixed(1);
     }}
     function renderList(id, items) {{
       const node = document.getElementById(id);

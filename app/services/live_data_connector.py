@@ -237,10 +237,13 @@ class LiveDataConnector:
             "summary": summary,
             "metadata": dict(session.metadata),
             "snapshots": [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
-            "actions": list(reversed(session.action_history[-20:])),
+            "actions": list(reversed(session.action_history[-30:])),
+            "action_effects": _action_effects(session.action_history),
+            "action_leaderboard": _action_leaderboard(session.action_history),
+            "director_score_card": _director_score_card(session.action_history),
             "post_live_summary": _post_live_summary(
                 [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
-                list(reversed(session.action_history[-20:])),
+                list(reversed(session.action_history[-30:])),
                 session.metadata,
             ),
         }
@@ -277,6 +280,7 @@ class LiveDataConnector:
         action = str(payload.get("action") or "").strip()[:120] or "已执行 AI 建议"
         sentence = str(payload.get("sentence") or "").strip()[:240]
         product = str(payload.get("current_product") or payload.get("product") or "").strip()[:160]
+        before_snapshot = session.snapshots[-1] if session.snapshots else None
         entry = {
             "timestamp": time.time(),
             "last_seen": time.time(),
@@ -289,9 +293,18 @@ class LiveDataConnector:
             "trend_signature": (),
             "repeat_count": 1,
             "event_type": "host_feedback",
+            "action_label": action,
+            "product": product,
+            "effect_status": "pending" if before_snapshot else "waiting_for_metrics",
+            "effect_window_seconds": 30,
+            "before_metrics": _effect_metrics(before_snapshot),
+            "after_metrics": {},
+            "effect_delta": {},
+            "effect_result": "等待数据",
+            "effect_due_at": time.time() + 30,
         }
         session.action_history.append(entry)
-        session.action_history = session.action_history[-20:]
+        session.action_history = session.action_history[-120:]
         self.action_history = session.action_history
         return {"ok": True, "host_id": resolved_host_id, "feedback": entry}
 
@@ -349,7 +362,7 @@ class LiveDataConnector:
             "event_type": "boss_intervention_ack",
         }
         session.action_history.append(entry)
-        session.action_history = session.action_history[-20:]
+        session.action_history = session.action_history[-120:]
         self.action_history = session.action_history
         return {"ok": True, "host_id": resolved_host_id, "intervention": dict(intervention)}
 
@@ -379,19 +392,31 @@ class LiveDataConnector:
 
     def _record_action(self, decision: LiveDecision, session: LiveSessionState) -> None:
         entry = _timeline_entry(decision)
-        last = session.action_history[-1] if session.action_history else None
+        last = next(
+            (
+                action for action in reversed(session.action_history)
+                if action.get("event_type") not in {"host_feedback", "boss_intervention_ack"}
+            ),
+            None,
+        )
         if last and not _should_append_timeline_entry(last, entry):
             last["last_seen"] = entry["timestamp"]
             last["repeat_count"] = int(last.get("repeat_count") or 1) + 1
             last["confidence"] = entry["confidence"]
             last["current_live_score"] = entry["current_live_score"]
-            decision.timeline = list(reversed(session.action_history))
+            decision.timeline = [
+                item for item in reversed(session.action_history)
+                if item.get("event_type") not in {"host_feedback", "boss_intervention_ack"}
+            ][:10]
             return
 
         session.action_history.append(entry)
-        session.action_history = session.action_history[-10:]
+        session.action_history = session.action_history[-120:]
         self.action_history = session.action_history
-        decision.timeline = list(reversed(session.action_history))
+        decision.timeline = [
+            item for item in reversed(session.action_history)
+            if item.get("event_type") not in {"host_feedback", "boss_intervention_ack"}
+        ][:10]
 
     def _fetch_live_payload(
         self,
@@ -516,6 +541,7 @@ class LiveDataConnector:
         session.snapshots = [item for item in session.snapshots if item.timestamp >= cutoff]
         self.snapshots.append(snapshot)
         self.snapshots = [item for item in self.snapshots if item.timestamp >= cutoff]
+        _update_action_effects(session, snapshot)
 
     def _trend_for(self, current: LiveMetricSnapshot, seconds: int, session: LiveSessionState) -> dict[str, str]:
         previous = self._snapshot_ago(seconds, session)
@@ -1065,6 +1091,157 @@ def _host_feedback_stats(actions: list[dict[str, Any]]) -> dict[str, Any]:
         "last_at": float(last.get("timestamp") or 0),
         "last_action": " / ".join(str(item) for item in (last.get("reason") or []) if item)[:120],
         "last_sentence": str(last.get("next_action") or "")[:160],
+    }
+
+
+def _effect_metrics(snapshot: LiveMetricSnapshot | None) -> dict[str, float]:
+    if snapshot is None:
+        return {}
+    return {
+        "timestamp": snapshot.timestamp,
+        "ctr": float(snapshot.item_click_rate or snapshot.ipv_uv_rate or 0),
+        "cvr": float(snapshot.item_conversion_rate or snapshot.pay_byr_rate or 0),
+        "gmv": float(snapshot.item_gmv or snapshot.pay_amt_5min_d_live or snapshot.pay_amt or 0),
+        "heat": float(snapshot.heat_score or 0),
+        "comments": float(snapshot.comment_uv or 0),
+        "online_uv": float(snapshot.online_uv or 0),
+    }
+
+
+def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapshot) -> None:
+    after = _effect_metrics(snapshot)
+    if not after:
+        return
+    now = time.time()
+    for action in session.action_history:
+        if action.get("event_type") != "host_feedback":
+            continue
+        if action.get("effect_status") != "pending":
+            continue
+        if now < float(action.get("effect_due_at") or 0):
+            continue
+        before = action.get("before_metrics") if isinstance(action.get("before_metrics"), dict) else {}
+        if not before:
+            action["effect_status"] = "waiting_for_metrics"
+            action["effect_result"] = "等待数据"
+            continue
+        delta = {
+            "ctr": after["ctr"] - float(before.get("ctr") or 0),
+            "cvr": after["cvr"] - float(before.get("cvr") or 0),
+            "gmv": after["gmv"] - float(before.get("gmv") or 0),
+            "heat": after["heat"] - float(before.get("heat") or 0),
+            "comments": after["comments"] - float(before.get("comments") or 0),
+            "online_uv": after["online_uv"] - float(before.get("online_uv") or 0),
+        }
+        score = _effect_score(delta)
+        action["after_metrics"] = after
+        action["effect_delta"] = delta
+        action["effect_score"] = score
+        action["effect_status"] = "done"
+        action["effect_result"] = "有效" if score >= 0 else "无效"
+        action["effect_summary"] = _effect_summary(delta)
+
+
+def _effect_score(delta: dict[str, float]) -> float:
+    return (
+        float(delta.get("gmv") or 0) / 100
+        + float(delta.get("cvr") or 0) * 1000
+        + float(delta.get("ctr") or 0) * 350
+        + float(delta.get("heat") or 0) / 20
+        + float(delta.get("comments") or 0) / 10
+    )
+
+
+def _effect_summary(delta: dict[str, float]) -> str:
+    parts: list[str] = []
+    gmv = float(delta.get("gmv") or 0)
+    cvr = float(delta.get("cvr") or 0)
+    ctr = float(delta.get("ctr") or 0)
+    heat = float(delta.get("heat") or 0)
+    if gmv:
+        parts.append(f"GMV {'+' if gmv > 0 else ''}¥{gmv:,.0f}")
+    if cvr:
+        parts.append(f"CVR {'+' if cvr > 0 else ''}{cvr * 100:.1f}%")
+    if ctr:
+        parts.append(f"CTR {'+' if ctr > 0 else ''}{ctr * 100:.1f}%")
+    if heat:
+        parts.append(f"热度 {'+' if heat > 0 else ''}{heat:,.0f}")
+    return " / ".join(parts[:3]) or "暂无明显变化"
+
+
+def _action_effects(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    feedback = [
+        action for action in actions
+        if action.get("event_type") == "host_feedback"
+    ]
+    return list(reversed(feedback[-20:]))
+
+
+def _action_leaderboard(actions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for action in actions:
+        if action.get("event_type") != "host_feedback" or action.get("effect_status") != "done":
+            continue
+        label = str(action.get("action_label") or "已执行 AI 建议")[:80]
+        item = grouped.setdefault(label, {
+            "action": label,
+            "count": 0,
+            "score_total": 0.0,
+            "gmv_delta": 0.0,
+            "cvr_delta": 0.0,
+            "ctr_delta": 0.0,
+            "heat_delta": 0.0,
+            "last_summary": "",
+        })
+        delta = action.get("effect_delta") if isinstance(action.get("effect_delta"), dict) else {}
+        item["count"] += 1
+        item["score_total"] += float(action.get("effect_score") or 0)
+        item["gmv_delta"] += float(delta.get("gmv") or 0)
+        item["cvr_delta"] += float(delta.get("cvr") or 0)
+        item["ctr_delta"] += float(delta.get("ctr") or 0)
+        item["heat_delta"] += float(delta.get("heat") or 0)
+        item["last_summary"] = str(action.get("effect_summary") or "")
+
+    rows = []
+    for item in grouped.values():
+        count = max(int(item["count"]), 1)
+        rows.append({
+            "action": item["action"],
+            "count": count,
+            "avg_score": item["score_total"] / count,
+            "avg_gmv_delta": item["gmv_delta"] / count,
+            "avg_cvr_delta": item["cvr_delta"] / count,
+            "avg_ctr_delta": item["ctr_delta"] / count,
+            "avg_heat_delta": item["heat_delta"] / count,
+            "summary": item["last_summary"],
+        })
+    return {
+        "top": sorted(rows, key=lambda item: item["avg_score"], reverse=True)[:5],
+        "worst": sorted(rows, key=lambda item: item["avg_score"])[:5],
+    }
+
+
+def _director_score_card(actions: list[dict[str, Any]]) -> dict[str, Any]:
+    timeline_actions = [
+        action for action in actions
+        if action.get("event_type") not in {"host_feedback", "boss_intervention_ack"}
+    ]
+    feedback = [action for action in actions if action.get("event_type") == "host_feedback"]
+    completed = [action for action in feedback if action.get("effect_status") == "done"]
+    effective = [action for action in completed if action.get("effect_result") == "有效"]
+    leaderboard = _action_leaderboard(actions)
+    best = leaderboard["top"][0]["action"] if leaderboard["top"] else "--"
+    worst = leaderboard["worst"][0]["action"] if leaderboard["worst"] else "--"
+    execution_rate = len(feedback) / max(len(timeline_actions), 1)
+    ai_hit_rate = len(effective) / max(len(completed), 1)
+    return {
+        "execution_rate": min(1.0, execution_rate),
+        "ai_hit_rate": ai_hit_rate if completed else None,
+        "executed_actions": len(feedback),
+        "measured_actions": len(completed),
+        "best_decision": best,
+        "worst_decision": worst,
+        "score": round((min(1.0, execution_rate) * 0.45 + (ai_hit_rate if completed else 0) * 0.55) * 100),
     }
 
 
