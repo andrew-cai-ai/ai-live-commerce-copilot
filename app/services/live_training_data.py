@@ -237,6 +237,49 @@ class LiveTrainingDataService:
             "by_best_action": _evaluation_by_action(evaluated),
         }
 
+    def model_readiness_summary(
+        self,
+        product_threshold: int = 30,
+        host_threshold: int = 30,
+        min_quality: int = 70,
+    ) -> dict[str, Any]:
+        return {
+            "dashboard": self.training_data_dashboard(),
+            "coverage": self.coverage_dashboard(product_threshold, host_threshold),
+            "evaluation": self.offline_evaluation(min_quality=min_quality),
+            "artifact": self.model_artifact_status(),
+            "action_library": self.action_library_summary(),
+        }
+
+    def model_artifact_status(self) -> dict[str, Any]:
+        if not self.model_path.exists():
+            return {
+                "status": "missing",
+                "model_path": str(self.model_path),
+                "accuracy": None,
+                "training_samples": 0,
+            }
+        try:
+            artifact = json.loads(self.model_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {
+                "status": "invalid",
+                "model_path": str(self.model_path),
+                "error": str(exc),
+            }
+        if not isinstance(artifact, dict):
+            return {"status": "invalid", "model_path": str(self.model_path)}
+        return {
+            "status": "ready",
+            "model_path": str(self.model_path),
+            "schema_version": artifact.get("schema_version"),
+            "accuracy": artifact.get("accuracy"),
+            "training_samples": artifact.get("training_samples"),
+            "test_samples": artifact.get("test_samples"),
+            "created_at": artifact.get("created_at"),
+            "action_distribution": (artifact.get("model") or {}).get("action_counts", {}),
+        }
+
     def train_director_model_v0(self, min_quality: int = 70) -> dict[str, Any]:
         dataset = self.training_dataset_v1(min_quality=min_quality, limit=100000)
         dataset = [item for item in dataset if item.get("action")]

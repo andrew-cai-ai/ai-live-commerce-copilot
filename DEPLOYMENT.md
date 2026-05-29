@@ -88,6 +88,10 @@ SERPAPI_API_KEY=
 
 Keep real keys in environment variables only. Do not paste them into source files or frontend code.
 
+`MODEL_V0_MIN_CONFIDENCE` (default `0.4`) controls when the learned director model overrides the default fallback. Predictions below this confidence use action code `A007` with metric-based reasons.
+
+Set `APP_COOKIE_SECURE=true` on HTTPS deployments (Render sets this in `render.yaml`) so the login cookie is not sent over plain HTTP.
+
 For any public deployment, set a strong `LIVE_INGEST_TOKEN` and configure the same value in the Chrome extension popup before going live.
 
 ## Current production notes

@@ -1,0 +1,25 @@
+{
+  "source": "chrome_extension",
+  "host_id": "fixture-host",
+  "liveId": "fixture-live",
+  "metrics": {
+    "dataList": [
+      {
+        "data": [
+          {"value": "累计观看,uv,13,13439,x"},
+          {"value": "在线,online_uv,15,15,x"},
+          {"value": "热度,heat_score,12,571,x"},
+          {"value": "成交金额,pay_amt,20,41230,x"},
+          {"value": "点击率,ipv_uv_rate,15.52%,0.1552,x"},
+          {"value": "5分钟停留,look_time_5min_avg_d_live,52,52,x"}
+        ]
+      }
+    ],
+    "dataRegion": {
+      "look_uv_td_d_live": 10511
+    }
+  },
+  "events": [
+    {"title": "Kragg Shirt", "payBuyerCnt": 3}
+  ]
+}

@@ -147,6 +147,13 @@ def admin_live(request: Request) -> str:
     return _render_admin_live()
 
 
+@app.get("/admin/model", response_class=HTMLResponse)
+def admin_model_readiness(request: Request) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_model_readiness_dashboard()
+
+
 @app.get("/boss", response_class=HTMLResponse)
 def boss_dashboard(request: Request) -> str:
     if not is_authenticated(request):
@@ -312,6 +319,13 @@ async def model_train_v0(request: Request) -> dict[str, Any]:
     if not isinstance(body, dict):
         body = {}
     return live_training_data.train_director_model_v0(min_quality=int(body.get("min_quality") or 70))
+
+
+@app.get("/api/model/readiness")
+async def model_readiness(request: Request, product_threshold: int = 30, host_threshold: int = 30, min_quality: int = 70) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_training_data.model_readiness_summary(product_threshold, host_threshold, min_quality)
 
 
 @app.post("/api/live/session-meta")
@@ -686,7 +700,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/boss">经营总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">AI 数据提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/boss">经营总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">AI 数据提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/admin/model">导演模型训练</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -887,6 +901,7 @@ def _render_live_console() -> str:
           <span class="label">下一句直接念</span>
           <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
           <div class="reason" id="reason">--</div>
+          <div class="reason" id="director-warnings" style="display:none;color:#a16207;font-weight:800;"></div>
           <div class="quick-actions">
             <button id="mark-executed" type="button" class="primary-action">我已照做，给下一步</button>
             <button id="copy-sentence" type="button" class="secondary-action">复制话术</button>
@@ -1317,6 +1332,17 @@ def _render_live_console() -> str:
       const sentence = nextSentence(data.current_action, data.next_action);
       document.getElementById("next-sentence").textContent = sentence;
       document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
+      const warningsNode = document.getElementById("director-warnings");
+      const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+      if (warningsNode) {
+        if (warnings.length) {
+          warningsNode.style.display = "block";
+          warningsNode.textContent = "提示：" + warnings.join(" / ");
+        } else {
+          warningsNode.style.display = "none";
+          warningsNode.textContent = "";
+        }
+      }
       document.getElementById("director-now").textContent = plan[0];
       document.getElementById("director-next").textContent = sequence ? "打法：" + sequence : plan[1];
       document.getElementById("director-avoid").textContent = plan[2];
@@ -1374,7 +1400,8 @@ def _render_live_console() -> str:
       node.innerHTML = items.slice(0, 8).map((item) => {
         const cls = item.event_type === "danger" ? " danger" : item.event_type === "warning" ? " warn" : "";
         const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
-        return '<div class="timeline-item' + cls + '"><b>' + time + ' · ' + normalizeAction(item.decision) + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(nextSentence(item.decision, item.next_action)) + '</div></div>';
+        const code = item.action_code ? "[" + item.action_code + "] " : "";
+        return '<div class="timeline-item' + cls + '"><b>' + time + ' · ' + code + normalizeAction(item.decision) + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(nextSentence(item.decision, item.next_action)) + '</div></div>';
       }).join("");
     }
     function renderQueue(data) {
@@ -2183,6 +2210,7 @@ def _render_admin_live() -> str:
           ["CVR", fmtPercent(session.pay_byr_rate)],
           ["当前商品", session.current_product || "--"],
           ["最新动作", session.current_action || "--"],
+          ["动作码", session.current_action_code || "--"],
           ["快照数", fmtNumber(session.snapshot_count)],
           ["商品级数据", session.product_level_connected ? "已连接" : "未连接"],
           ["插件版本", (session.extension_version || "--") + (session.extension_update_available ? " · 需更新" : "")],
@@ -2198,6 +2226,167 @@ def _render_admin_live() -> str:
     }
     refresh();
     window.setInterval(refresh, 5000);
+  </script>
+</body>
+</html>"""
+
+
+def _render_model_readiness_dashboard() -> str:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>导演模型训练</title>
+  <style>
+    :root { color-scheme: light; --ink: #111827; --muted: #66736f; --line: #d8e1dd; --paper: #f5f8f6; --panel: #fff; --accent: #0c6b58; --warn: #a16207; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px 18px 56px; }
+    header { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 32px; }
+    a { color: var(--accent); text-decoration: none; font-weight: 900; }
+    .small { color: var(--muted); font-size: 13px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .card, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .card span { display: block; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+    .card b { display: block; font-size: 30px; margin-top: 4px; }
+    .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+    input, select { border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; background: #fff; }
+    button { border: 0; border-radius: 8px; background: var(--accent); color: #fff; padding: 10px 12px; font-weight: 900; cursor: pointer; }
+    button.secondary { background: #e7efeb; color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; font-size: 13px; }
+    th { color: var(--muted); font-size: 12px; }
+    .table-wrap { overflow-x: auto; }
+    .list { display: grid; gap: 8px; }
+    .list-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
+    .status-ready { color: var(--accent); font-weight: 900; }
+    .status-missing { color: var(--warn); font-weight: 900; }
+    .toast { margin-top: 10px; color: var(--accent); font-weight: 900; min-height: 20px; }
+    @media (max-width: 900px) { .kpis, .layout { grid-template-columns: 1fr; } header { display: block; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><h1>导演模型训练</h1><div class="small">查看训练样本、覆盖率、离线评估，并一键训练 director model v0</div></div>
+      <div><a href="/admin/live">直播监控</a> · <a href="/boss">经营看板</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
+    </header>
+    <section class="controls">
+      <label>样本质量阈值 <input id="min-quality" type="number" min="0" max="100" value="70" style="width:80px;"></label>
+      <label>商品样本目标 <input id="product-threshold" type="number" min="1" value="30" style="width:80px;"></label>
+      <label>主播样本目标 <input id="host-threshold" type="number" min="1" value="30" style="width:80px;"></label>
+      <button id="refresh" type="button" class="secondary">刷新</button>
+      <button id="train-v0" type="button">训练 Model v0</button>
+    </section>
+    <div class="toast" id="toast"></div>
+    <section class="kpis">
+      <div class="card"><span>总样本</span><b id="total-samples">--</b></div>
+      <div class="card"><span>可训练样本</span><b id="training-samples">--</b></div>
+      <div class="card"><span>平均质量分</span><b id="avg-quality">--</b></div>
+      <div class="card"><span>模型状态</span><b id="model-status">--</b></div>
+    </section>
+    <section class="layout">
+      <div class="panel">
+        <h2>离线评估</h2>
+        <div class="list" id="evaluation-metrics">
+          <div class="list-item">等待数据...</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>模型产物</h2>
+        <div class="list" id="artifact-details">
+          <div class="list-item">等待数据...</div>
+        </div>
+      </div>
+    </section>
+    <section class="panel" style="margin-top:14px;">
+      <h2>动作库样本分布</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>动作码</th><th>名称</th><th>样本数</th><th>训练样本</th><th>有效转化率</th></tr></thead>
+          <tbody id="action-rows"><tr><td colspan="5">等待数据...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="layout" style="margin-top:14px;">
+      <div class="panel">
+        <h2>缺样本商品</h2>
+        <div class="list" id="product-gaps"><div class="list-item">等待数据...</div></div>
+      </div>
+      <div class="panel">
+        <h2>缺样本主播</h2>
+        <div class="list" id="host-gaps"><div class="list-item">等待数据...</div></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    function escapeHtml(value) { return String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) ? (numeric * 100).toFixed(1) + "%" : "--"; }
+    function queryParams() {
+      const minQuality = Number(document.getElementById("min-quality").value || 70);
+      const productThreshold = Number(document.getElementById("product-threshold").value || 30);
+      const hostThreshold = Number(document.getElementById("host-threshold").value || 30);
+      return "?min_quality=" + encodeURIComponent(minQuality) + "&product_threshold=" + encodeURIComponent(productThreshold) + "&host_threshold=" + encodeURIComponent(hostThreshold);
+    }
+    function renderGaps(nodeId, items) {
+      const node = document.getElementById(nodeId);
+      if (!items.length) { node.innerHTML = '<div class="list-item">暂无缺口</div>'; return; }
+      node.innerHTML = items.slice(0, 12).map((item) => '<div class="list-item"><b>' + escapeHtml(item.name || item.product_name || item.host_name || item.key) + '</b><div class="small">已有 ' + escapeHtml(item.samples) + ' · 还缺 ' + escapeHtml(item.sample_gap || 0) + '</div></div>').join("");
+    }
+    async function refresh() {
+      const response = await fetch("/api/model/readiness" + queryParams());
+      const data = await response.json();
+      if (data.error) { document.getElementById("toast").textContent = data.error; return; }
+      const dashboard = data.dashboard || {};
+      const evaluation = data.evaluation || {};
+      const artifact = data.artifact || {};
+      const coverage = data.coverage || {};
+      document.getElementById("total-samples").textContent = dashboard.total_samples ?? "--";
+      document.getElementById("training-samples").textContent = dashboard.training_samples ?? "--";
+      document.getElementById("avg-quality").textContent = dashboard.avg_quality ?? "--";
+      const statusNode = document.getElementById("model-status");
+      statusNode.textContent = artifact.status || "missing";
+      statusNode.className = artifact.status === "ready" ? "status-ready" : "status-missing";
+      document.getElementById("evaluation-metrics").innerHTML = [
+        ["评估样本", evaluation.evaluated_samples],
+        ["导演准确率", fmtPercent(evaluation.director_accuracy)],
+        ["主播最佳动作率", fmtPercent(evaluation.host_execution_best_action_rate)]
+      ].map((row) => '<div class="list-item"><span class="small">' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
+      document.getElementById("artifact-details").innerHTML = [
+        ["路径", artifact.model_path],
+        ["准确率", artifact.accuracy],
+        ["训练样本", artifact.training_samples],
+        ["测试样本", artifact.test_samples]
+      ].map((row) => '<div class="list-item"><span class="small">' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
+      const actions = (data.action_library && data.action_library.actions) || [];
+      const actionRows = document.getElementById("action-rows");
+      if (!actions.length) {
+        actionRows.innerHTML = '<tr><td colspan="5">暂无动作统计</td></tr>';
+      } else {
+        actionRows.innerHTML = actions.map((item) => '<tr><td>' + escapeHtml(item.code) + '</td><td>' + escapeHtml(item.name) + '</td><td>' + escapeHtml(item.samples) + '</td><td>' + escapeHtml(item.training_samples) + '</td><td>' + fmtPercent(item.effective_rate) + '</td></tr>').join("");
+      }
+      renderGaps("product-gaps", coverage.products_needing_samples || []);
+      renderGaps("host-gaps", coverage.hosts_needing_samples || []);
+    }
+    async function trainModel() {
+      const minQuality = Number(document.getElementById("min-quality").value || 70);
+      const response = await fetch("/api/model/train-v0", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ min_quality: minQuality })
+      });
+      const data = await response.json();
+      document.getElementById("toast").textContent = data.status === "trained"
+        ? "训练完成，准确率 " + fmtPercent(data.accuracy)
+        : "训练未执行：" + (data.status || "unknown");
+      refresh();
+    }
+    document.getElementById("refresh").addEventListener("click", refresh);
+    document.getElementById("train-v0").addEventListener("click", trainModel);
+    refresh();
   </script>
 </body>
 </html>"""
@@ -2247,7 +2436,7 @@ def _render_boss_dashboard() -> str:
   <main>
     <header>
       <div><h1>经营总控看板</h1><div class="small">老板看大盘、看风险、看异常；主播主线由实时数据自动指挥</div></div>
-      <div><a href="/admin/live">直播监控后台</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
+      <div><a href="/admin/live">直播监控后台</a> · <a href="/admin/model">导演模型训练</a> · <a href="/live">主播控制台</a> · <a href="/">返回首页</a></div>
     </header>
     <section class="workspace-bar">
       <input id="workspace-input" placeholder="输入老板/门店绑定码；留空查看全部">
@@ -2274,8 +2463,8 @@ def _render_boss_dashboard() -> str:
       <h2>直播间表现与执行</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>直播间</th><th>评分</th><th>执行</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>最新动作</th><th>操作</th></tr></thead>
-          <tbody id="room-rows"><tr><td colspan="9">等待数据...</td></tr></tbody>
+          <thead><tr><th>直播间</th><th>评分</th><th>执行</th><th>GMV</th><th>在线</th><th>CTR</th><th>CVR</th><th>动作码</th><th>最新动作</th><th>操作</th></tr></thead>
+          <tbody id="room-rows"><tr><td colspan="10">等待数据...</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -2316,11 +2505,11 @@ def _render_boss_dashboard() -> str:
     function renderTopRoom(room) {
       const node = document.getElementById("top-room");
       if (!room) { node.textContent = "等待数据..."; return; }
-      node.innerHTML = '<h3>' + escapeHtml(room.display_name || room.host_id) + '</h3><p>当前 GMV：<b>' + fmtMoney(room.pay_amt) + '</b></p><p>在线：' + fmtNumber(room.online_uv) + ' · CTR ' + fmtPercent(room.ipv_uv_rate) + ' · CVR ' + fmtPercent(room.pay_byr_rate) + '</p><p class="small">近 5 分钟执行：' + fmtNumber(room.host_feedback_count_5m) + ' 次</p>';
+      node.innerHTML = '<h3>' + escapeHtml(room.display_name || room.host_id) + '</h3><p>当前 GMV：<b>' + fmtMoney(room.pay_amt) + '</b></p><p>在线：' + fmtNumber(room.online_uv) + ' · CTR ' + fmtPercent(room.ipv_uv_rate) + ' · CVR ' + fmtPercent(room.pay_byr_rate) + '</p><p class="small">动作码：' + escapeHtml(room.current_action_code || "--") + ' · ' + escapeHtml(room.current_action || "--") + '</p><p class="small">近 5 分钟执行：' + fmtNumber(room.host_feedback_count_5m) + ' 次</p>';
     }
     function renderRooms(rooms) {
       const node = document.getElementById("room-rows");
-      if (!rooms.length) { node.innerHTML = '<tr><td colspan="9">等待数据...</td></tr>'; return; }
+      if (!rooms.length) { node.innerHTML = '<tr><td colspan="10">等待数据...</td></tr>'; return; }
       node.innerHTML = rooms.map((room) => {
         const url = "/admin/live/" + encodeURIComponent(room.host_id);
         const feedback = fmtNumber(room.host_feedback_count_5m) + '次 / 5m' + (room.last_host_feedback_action ? '<div class="small">' + escapeHtml(room.last_host_feedback_action) + '</div>' : '');
@@ -2330,7 +2519,7 @@ def _render_boss_dashboard() -> str:
           + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="高点击低成交，补一句价格价值。">提醒价格</button>'
           + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="数据开始下滑，注意准备切下一件。">提醒切品</button>'
           + '</div>';
-        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + pending + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a>' + buttons + '</td></tr>';
+        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + pending + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td><b>' + escapeHtml(room.current_action_code || "--") + '</b></td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a>' + buttons + '</td></tr>';
       }).join("");
       node.querySelectorAll(".intervention-buttons button").forEach((button) => {
         button.addEventListener("click", () => sendIntervention(button.dataset.hostId, button.dataset.workspaceId, button.dataset.message));
@@ -2495,7 +2684,7 @@ def _render_admin_live_detail(host_id: str) -> str:
       document.getElementById("total-viewers").textContent = fmtNumber(latest.total_viewers || summary.total_viewers);
       document.getElementById("pay-amt").textContent = fmtMoney(latest.pay_amt || summary.pay_amt);
       document.getElementById("heat-score").textContent = fmtNumber(latest.heat_score || summary.heat_score);
-      document.getElementById("current-action").textContent = summary.current_action || "--";
+      document.getElementById("current-action").textContent = (summary.current_action_code ? summary.current_action_code + " · " : "") + (summary.current_action || "--");
       renderChart(snapshots);
       renderSummary(data.post_live_summary || {{}});
       renderLearning(data);
@@ -2516,7 +2705,10 @@ def _render_admin_live_detail(host_id: str) -> str:
     function renderTimeline(actions) {{
       const node = document.getElementById("timeline");
       if (!actions.length) {{ node.innerHTML = '<div class="timeline-item">等待动作...</div>'; return; }}
-      node.innerHTML = actions.slice(0, 10).map((item) => '<div class="timeline-item"><b>' + timeText(item.timestamp) + ' · ' + escapeHtml(item.decision || "--") + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(item.next_action || "--") + '</div></div>').join("");
+      node.innerHTML = actions.slice(0, 10).map((item) => {{
+        const code = item.action_code ? "[" + item.action_code + "] " : "";
+        return '<div class="timeline-item"><b>' + timeText(item.timestamp) + ' · ' + code + escapeHtml(item.decision || "--") + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(item.next_action || "--") + '</div></div>';
+      }}).join("");
     }}
     function renderSummary(summary) {{
       document.getElementById("post-live-headline").textContent = summary.headline || "暂无可复盘数据";

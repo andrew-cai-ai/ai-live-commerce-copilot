@@ -29,11 +29,13 @@ def password_matches(password: str) -> bool:
 
 
 def set_auth_cookie(response: Response) -> None:
+    secure = os.getenv("APP_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes"}
     response.set_cookie(
         AUTH_COOKIE_NAME,
         _auth_token(),
         httponly=True,
         samesite="lax",
+        secure=secure,
         max_age=60 * 60 * 12,
     )
 

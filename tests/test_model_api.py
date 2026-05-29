@@ -10,6 +10,16 @@ class ModelApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
+    def test_model_readiness_endpoint_returns_summary(self) -> None:
+        response = self.client.get("/api/model/readiness?product_threshold=3&host_threshold=3&min_quality=70")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("dashboard", payload)
+        self.assertIn("coverage", payload)
+        self.assertIn("evaluation", payload)
+        self.assertIn("artifact", payload)
+        self.assertIn("action_library", payload)
+
     def test_model_readiness_apis_return_json(self) -> None:
         routes = [
             "/api/model/training-dashboard",

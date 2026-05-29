@@ -3,6 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 
+from app.services.live_connector import constants as live_constants
 from app.services.inventory_import import _normalize_taobao_payload
 from app.services.live_data_connector import (
     LATEST_EXTENSION_VERSION,
@@ -219,6 +220,19 @@ class LiveDataConnectorTests(unittest.TestCase):
             finally:
                 live_training_data.model_path = old_model_path
 
+    def test_fixture_extension_payload_parses_encoded_metrics(self) -> None:
+        fixture_path = Path(__file__).resolve().parent / "fixtures" / "extension_metrics_sample.json"
+        payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+        normalized = _normalize_ingested_payload(payload)
+        metrics = _extract_taobao_encoded_metrics(normalized)
+        self.assertEqual(metrics.get("uv"), 13439)
+        self.assertEqual(metrics.get("online_uv"), 15)
+        self.assertEqual(metrics.get("look_time_5min_avg_d_live"), 52)
+        connector = LiveDataConnector()
+        decision = connector.ingest_live_metrics(payload)
+        self.assertEqual(decision.snapshot.uv, 13439)
+        self.assertEqual(decision.snapshot.online_uv, 15)
+
     def test_rules_take_priority_over_model_v0(self) -> None:
         old_model_path = live_training_data.model_path
         with tempfile.TemporaryDirectory() as dirname:
@@ -254,6 +268,10 @@ class LiveDataConnectorTests(unittest.TestCase):
                 })
                 self.assertEqual(decision.action_code, "A001")
                 self.assertEqual(decision.current_action, "switch to sizing explanation")
+                self.assertTrue(
+                    any("model_v0 suggests" in warning for warning in decision.warnings),
+                    msg=f"expected model disagreement warning, got {decision.warnings}",
+                )
             finally:
                 live_training_data.model_path = old_model_path
 
@@ -316,6 +334,46 @@ class LiveDataConnectorTests(unittest.TestCase):
                 self.assertEqual(decision.current_action, "engage comments")
             finally:
                 live_training_data.model_path = old_model_path
+
+    def test_model_low_confidence_falls_back_to_a007(self) -> None:
+        old_model_path = live_training_data.model_path
+        old_threshold = live_constants.MODEL_V0_MIN_CONFIDENCE
+        live_constants.MODEL_V0_MIN_CONFIDENCE = 0.9
+        with tempfile.TemporaryDirectory() as dirname:
+            try:
+                live_training_data.model_path = Path(dirname) / "director_model_v0.json"
+                live_training_data.model_path.write_text(json.dumps({
+                    "schema_version": "director_model_v0",
+                    "accuracy": 0.5,
+                    "training_samples": 10,
+                    "model": {
+                        "actions": ["A004", "A007"],
+                        "action_counts": {"A004": 5, "A007": 5},
+                        "feature_counts": {},
+                    },
+                }), encoding="utf-8")
+                connector = LiveDataConnector()
+                decision = connector.ingest_live_metrics({
+                    "source": "chrome_extension",
+                    "host_id": "host-low-confidence",
+                    "liveId": "live-low-confidence",
+                    "metrics": {
+                        "online_uv": 30,
+                        "uv": 300,
+                        "pv": 600,
+                        "heat_score": 300,
+                        "pay_amt": 1000,
+                        "pay_byr_rate": 0.02,
+                        "ipv_uv_rate": 0.08,
+                        "comment_uv": 12,
+                    },
+                })
+                self.assertEqual(decision.action_code, "A007")
+                self.assertEqual(decision.current_action, "engage comments")
+                self.assertTrue(any("low confidence" in reason for reason in decision.reason))
+            finally:
+                live_training_data.model_path = old_model_path
+                live_constants.MODEL_V0_MIN_CONFIDENCE = old_threshold
 
     def test_host_feedback_stores_action_code(self) -> None:
         connector = LiveDataConnector()
