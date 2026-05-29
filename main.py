@@ -25,6 +25,7 @@ from app.services.inventory_import import (
 )
 from app.services.live_data_connector import LiveDataConnector
 from app.services.live_memory import live_memory
+from app.services.live_training_data import live_training_data
 from app.services.report_history import get_report_path, list_reports, save_report
 from app.services.taobao_live_scoring import TaobaoLiveScoringService
 from scoring import parse_manual_research_overrides, score_products
@@ -268,6 +269,47 @@ async def live_product_playbook(request: Request, product_name: str = "", host_i
         "product": live_memory.product_profile(product_name),
         "host": live_memory.host_profile(host_id),
     }
+
+
+@app.get("/api/model/training-dashboard")
+async def model_training_dashboard(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_training_data.training_data_dashboard()
+
+
+@app.get("/api/model/coverage")
+async def model_coverage(request: Request, product_threshold: int = 30, host_threshold: int = 30) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_training_data.coverage_dashboard(product_threshold, host_threshold)
+
+
+@app.get("/api/model/cold-start")
+async def model_cold_start(request: Request, product_name: str, top_k: int = 3) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_training_data.cold_start_recommendation(product_name, top_k=top_k)
+
+
+@app.get("/api/model/offline-evaluation")
+async def model_offline_evaluation(request: Request, min_quality: int = 70) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return live_training_data.offline_evaluation(min_quality=min_quality)
+
+
+@app.post("/api/model/train-v0")
+async def model_train_v0(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    return live_training_data.train_director_model_v0(min_quality=int(body.get("min_quality") or 70))
 
 
 @app.post("/api/live/session-meta")

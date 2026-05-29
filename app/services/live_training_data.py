@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 TRAINING_PATH = DATA_DIR / "live_director_training.jsonl"
 GRAPH_PATH = DATA_DIR / "live_knowledge_graph.json"
+MODEL_V0_PATH = DATA_DIR / "director_model_v0.json"
 
 
 ACTION_LIBRARY: dict[str, dict[str, Any]] = {
@@ -26,9 +27,15 @@ ACTION_LIBRARY: dict[str, dict[str, Any]] = {
 
 
 class LiveTrainingDataService:
-    def __init__(self, training_path: Path = TRAINING_PATH, graph_path: Path = GRAPH_PATH) -> None:
+    def __init__(
+        self,
+        training_path: Path = TRAINING_PATH,
+        graph_path: Path = GRAPH_PATH,
+        model_path: Path = MODEL_V0_PATH,
+    ) -> None:
         self.training_path = training_path
         self.graph_path = graph_path
+        self.model_path = model_path
         self.graph = self._load_graph()
 
     def record_sample(
@@ -135,6 +142,138 @@ class LiveTrainingDataService:
             for row in rows
             if int(row.get("sample_quality_score") or 0) >= min_quality and row.get("use_for_training")
         ]
+
+    def training_data_dashboard(self) -> dict[str, Any]:
+        rows = self._read_recent_samples(limit=100000)
+        high_quality = [row for row in rows if int(row.get("sample_quality_score") or 0) >= 70]
+        training = [row for row in rows if row.get("use_for_training")]
+        rejected = [row for row in rows if not row.get("use_for_training")]
+        return {
+            "total_samples": len(rows),
+            "high_quality_samples": len(high_quality),
+            "training_samples": len(training),
+            "rejected_samples": len(rejected),
+            "by_product": _group_sample_counts(rows, "product_name"),
+            "by_host": _group_sample_counts(rows, "host_id"),
+            "by_action": _group_sample_counts(rows, "action_code", action_names=True),
+            "avg_quality": round(sum(int(row.get("sample_quality_score") or 0) for row in rows) / max(len(rows), 1), 1),
+        }
+
+    def coverage_dashboard(self, min_product_samples: int = 30, min_host_samples: int = 30) -> dict[str, Any]:
+        graph = self.graph
+        products = [
+            _coverage_row(key, item, min_product_samples)
+            for key, item in graph.get("products", {}).items()
+        ]
+        hosts = [
+            _coverage_row(key, item, min_host_samples)
+            for key, item in graph.get("hosts", {}).items()
+        ]
+        products.sort(key=lambda item: (item["sample_gap"], item["samples"]), reverse=True)
+        hosts.sort(key=lambda item: (item["sample_gap"], item["samples"]), reverse=True)
+        return {
+            "product_threshold": min_product_samples,
+            "host_threshold": min_host_samples,
+            "products_needing_samples": [item for item in products if item["sample_gap"] > 0],
+            "hosts_needing_samples": [item for item in hosts if item["sample_gap"] > 0],
+            "product_coverage_rate": _coverage_rate(products),
+            "host_coverage_rate": _coverage_rate(hosts),
+        }
+
+    def cold_start_recommendation(self, product_name: str, top_k: int = 3) -> dict[str, Any]:
+        target_dna = infer_product_dna(product_name)
+        candidates = []
+        for key, product in self.graph.get("products", {}).items():
+            dna = {
+                "category": product.get("category"),
+                "tags": product.get("tags") or [],
+            }
+            score = _dna_similarity(target_dna, dna)
+            if score <= 0:
+                continue
+            candidates.append({
+                "product_key": key,
+                "product_name": product.get("name") or key,
+                "similarity": round(score, 3),
+                "samples": int(product.get("samples") or 0),
+                "best_practices": _best_practice_from_product(product),
+            })
+        candidates.sort(key=lambda item: (item["similarity"], item["samples"]), reverse=True)
+        inherited = candidates[0]["best_practices"] if candidates else _cold_start_default(target_dna)
+        return {
+            "product_name": product_name,
+            "product_dna": target_dna,
+            "similar_products": candidates[:top_k],
+            "inherited_playbook": inherited,
+            "cold_start_confidence": round(candidates[0]["similarity"], 3) if candidates else 0.35,
+        }
+
+    def offline_evaluation(self, min_quality: int = 70) -> dict[str, Any]:
+        rows = [
+            row for row in self._read_recent_samples(limit=100000)
+            if int(row.get("sample_quality_score") or 0) >= min_quality
+        ]
+        evaluated = []
+        for row in rows:
+            best = _best_action_for_sample(row, self.graph)
+            ai_action = classify_action(" ".join(str(item) for item in [
+                (row.get("ai_decision") or {}).get("decision"),
+                (row.get("ai_decision") or {}).get("next_action"),
+            ]))
+            host_action = row.get("action_code")
+            evaluated.append({
+                "ai_match": ai_action == best,
+                "host_match": host_action == best,
+                "best_action": best,
+                "ai_action": ai_action,
+                "host_action": host_action,
+            })
+        total = len(evaluated)
+        return {
+            "evaluated_samples": total,
+            "director_accuracy": round(sum(1 for item in evaluated if item["ai_match"]) / max(total, 1), 4),
+            "host_execution_best_action_rate": round(sum(1 for item in evaluated if item["host_match"]) / max(total, 1), 4),
+            "by_best_action": _evaluation_by_action(evaluated),
+        }
+
+    def train_director_model_v0(self, min_quality: int = 70) -> dict[str, Any]:
+        dataset = self.training_dataset_v1(min_quality=min_quality, limit=100000)
+        dataset = [item for item in dataset if item.get("action")]
+        if len(dataset) < 5:
+            return {
+                "status": "not_enough_data",
+                "training_samples": len(dataset),
+                "min_required": 5,
+                "accuracy": None,
+                "model_path": str(self.model_path),
+            }
+        split = max(1, int(len(dataset) * 0.8))
+        train_rows = dataset[:split]
+        test_rows = dataset[split:] or dataset[-1:]
+        model = _fit_director_model(train_rows)
+        predictions = [_predict_director_action(model, row["state"]) for row in test_rows]
+        correct = sum(1 for prediction, row in zip(predictions, test_rows) if prediction == row["action"])
+        accuracy = correct / max(len(test_rows), 1)
+        artifact = {
+            "schema_version": "director_model_v0",
+            "created_at": time.time(),
+            "min_quality": min_quality,
+            "training_samples": len(train_rows),
+            "test_samples": len(test_rows),
+            "accuracy": round(accuracy, 4),
+            "model_type": "feature_weighted_action_frequency",
+            "model": model,
+        }
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.model_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {
+            "status": "trained",
+            "training_samples": len(train_rows),
+            "test_samples": len(test_rows),
+            "accuracy": round(accuracy, 4),
+            "model_path": str(self.model_path),
+            "action_distribution": model["action_counts"],
+        }
 
     def _append_jsonl(self, sample: dict[str, Any]) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -406,6 +545,163 @@ def _training_state(sample: dict[str, Any]) -> dict[str, Any]:
         "comment_topics": sample.get("comment_topics") or [],
         "host_id": sample.get("host_id"),
     }
+
+
+def _group_sample_counts(rows: list[dict[str, Any]], field: str, action_names: bool = False) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get(field) or "unknown")
+        item = grouped.setdefault(key, {"key": key, "samples": 0, "training_samples": 0, "quality_total": 0})
+        item["samples"] += 1
+        item["training_samples"] += 1 if row.get("use_for_training") else 0
+        item["quality_total"] += int(row.get("sample_quality_score") or 0)
+    output = []
+    for item in grouped.values():
+        samples = max(int(item["samples"]), 1)
+        output.append({
+            "key": item["key"],
+            "name": ACTION_LIBRARY.get(item["key"], {}).get("name", item["key"]) if action_names else item["key"],
+            "samples": item["samples"],
+            "training_samples": item["training_samples"],
+            "avg_quality": round(item["quality_total"] / samples, 1),
+        })
+    return sorted(output, key=lambda item: item["samples"], reverse=True)
+
+
+def _coverage_row(key: str, item: dict[str, Any], threshold: int) -> dict[str, Any]:
+    samples = int(item.get("samples") or 0)
+    return {
+        "key": key,
+        "name": item.get("name") or key,
+        "samples": samples,
+        "sample_gap": max(0, threshold - samples),
+        "coverage": min(1.0, samples / max(threshold, 1)),
+    }
+
+
+def _coverage_rate(rows: list[dict[str, Any]]) -> float:
+    if not rows:
+        return 0.0
+    return round(sum(1 for item in rows if item["sample_gap"] <= 0) / len(rows), 4)
+
+
+def _dna_similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
+    score = 0.0
+    if left.get("category") and left.get("category") == right.get("category"):
+        score += 0.45
+    left_tags = set(left.get("tags") or [])
+    right_tags = set(right.get("tags") or [])
+    if left_tags or right_tags:
+        score += 0.35 * (len(left_tags & right_tags) / max(len(left_tags | right_tags), 1))
+    if left.get("season") == right.get("season"):
+        score += 0.10
+    if left.get("price_band") == right.get("price_band"):
+        score += 0.10
+    return score
+
+
+def _cold_start_default(dna: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recommended_sequence": dna.get("recommended_strategy") or ["适合谁", "尺码/场景", "价格价值"],
+        "top_actions": [],
+        "sample_count": 0,
+        "category": dna.get("category") or "--",
+        "comment_topics": [],
+    }
+
+
+def _best_action_for_sample(sample: dict[str, Any], graph: dict[str, Any]) -> str:
+    product_key = _key(str(sample.get("product_name") or ""))
+    product = graph.get("products", {}).get(product_key, {})
+    actions = product.get("actions") or graph.get("actions") or {}
+    if not actions:
+        return str(sample.get("action_code") or "A007")
+    best_code = str(sample.get("action_code") or "A007")
+    best_score = None
+    for code, stats in actions.items():
+        count = max(int(stats.get("count") or 0), 1)
+        score = _to_float(stats.get("score_total")) / count
+        if best_score is None or score > best_score:
+            best_code = code
+            best_score = score
+    return best_code
+
+
+def _evaluation_by_action(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, int]] = {}
+    for row in rows:
+        key = str(row.get("best_action") or "unknown")
+        item = grouped.setdefault(key, {"total": 0, "ai_correct": 0, "host_correct": 0})
+        item["total"] += 1
+        item["ai_correct"] += 1 if row.get("ai_match") else 0
+        item["host_correct"] += 1 if row.get("host_match") else 0
+    return [
+        {
+            "action": key,
+            "name": ACTION_LIBRARY.get(key, {}).get("name", key),
+            "samples": item["total"],
+            "director_accuracy": round(item["ai_correct"] / max(item["total"], 1), 4),
+            "host_match_rate": round(item["host_correct"] / max(item["total"], 1), 4),
+        }
+        for key, item in sorted(grouped.items(), key=lambda pair: pair[1]["total"], reverse=True)
+    ]
+
+
+def _fit_director_model(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    action_counts: dict[str, int] = {}
+    feature_counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        action = str(row.get("action") or "A007")
+        action_counts[action] = action_counts.get(action, 0) + 1
+        for feature in _state_features(row.get("state") or {}):
+            bucket = feature_counts.setdefault(feature, {})
+            bucket[action] = bucket.get(action, 0) + 1
+    return {
+        "action_counts": action_counts,
+        "feature_counts": feature_counts,
+        "actions": sorted(action_counts),
+    }
+
+
+def _predict_director_action(model: dict[str, Any], state: dict[str, Any]) -> str:
+    actions = model.get("actions") or list(ACTION_LIBRARY)
+    action_counts = model.get("action_counts") or {}
+    total = sum(int(value) for value in action_counts.values()) or 1
+    scores = {}
+    for action in actions:
+        scores[action] = (int(action_counts.get(action) or 0) + 1) / (total + len(actions))
+    for feature in _state_features(state):
+        bucket = (model.get("feature_counts") or {}).get(feature, {})
+        bucket_total = sum(int(value) for value in bucket.values()) or 0
+        for action in actions:
+            scores[action] *= (int(bucket.get(action) or 0) + 1) / (bucket_total + len(actions))
+    return max(scores.items(), key=lambda item: item[1])[0] if scores else "A007"
+
+
+def _state_features(state: dict[str, Any]) -> list[str]:
+    features = [
+        f"category={state.get('product_category') or 'unknown'}",
+        f"season={state.get('season') or 'unknown'}",
+        f"price_band={state.get('price_band') or 'unknown'}",
+        f"ctr={_metric_bin(state.get('ctr'), [0.03, 0.08, 0.15])}",
+        f"cvr={_metric_bin(state.get('cvr'), [0.01, 0.02, 0.04])}",
+        f"heat={_metric_bin(state.get('heat'), [200, 500, 800])}",
+        f"online={_metric_bin(state.get('online_uv'), [20, 100, 500])}",
+    ]
+    features.extend(f"tag={tag}" for tag in (state.get("product_tags") or [])[:5])
+    features.extend(f"topic={topic}" for topic in (state.get("comment_topics") or [])[:5])
+    return features
+
+
+def _metric_bin(value: Any, thresholds: list[float]) -> str:
+    number = _to_float(value)
+    if number <= thresholds[0]:
+        return "low"
+    if number <= thresholds[1]:
+        return "mid"
+    if number <= thresholds[2]:
+        return "high"
+    return "very_high"
 
 
 def _rollup_action(bucket: dict[str, Any], code: str, name: str, sample: dict[str, Any], score: float, cvr: float) -> None:
