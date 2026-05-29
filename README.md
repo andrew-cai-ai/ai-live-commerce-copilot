@@ -221,6 +221,8 @@ Use this instead of sending the extension through Gmail, which may block extensi
 
 The connector tags each stream with `host_id/liveId`. The report page can auto-use the only active stream, or you can set the `Live room / host ID` field manually when multiple hosts are live.
 
+For a real 30-minute validation run, use [REAL_LIVE_TRIAL.md](REAL_LIVE_TRIAL.md).
+
 Final MVP polish:
 
 - Product-specific script templates:
