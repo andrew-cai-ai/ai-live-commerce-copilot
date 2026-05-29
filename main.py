@@ -783,11 +783,24 @@ def _render_live_console() -> str:
     .director-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 14px; }
     .director-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--panel); min-height: 92px; }
     .director-card b { display: block; font-size: 19px; margin-top: 5px; }
+    .execution-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .switch-card, .comment-priority { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--panel); }
+    .switch-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+    .switch-metric { border-radius: 8px; background: #fbfdfb; border: 1px solid var(--line); padding: 10px; min-height: 76px; }
+    .switch-metric b { display: block; font-size: 23px; margin-top: 4px; color: var(--accent); overflow-wrap: anywhere; }
+    .transition-line { margin-top: 10px; border-radius: 8px; background: #eef8f3; color: var(--accent); padding: 10px; font-size: 18px; font-weight: 950; }
+    .comment-list { display: grid; gap: 8px; margin-top: 10px; }
+    .comment-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
+    .comment-item b { display: block; font-size: 18px; margin-bottom: 4px; }
+    .comment-meta { color: var(--muted); font-size: 12px; font-weight: 850; margin-top: 5px; }
+    .push-mode { display: none; margin-top: 14px; border: 2px solid #b7791f; background: #fffbeb; color: #713f12; border-radius: 10px; padding: 14px; font-weight: 950; }
+    .push-mode.show { display: block; }
+    .push-mode ul { margin: 8px 0 0; padding-left: 20px; }
     .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: var(--accent-soft); color: var(--accent); font-weight: 950; }
     .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
-    @media (max-width: 900px) { .cards, .director-strip { grid-template-columns: 1fr; } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
+    @media (max-width: 900px) { .cards, .director-strip, .execution-grid, .switch-metrics { grid-template-columns: 1fr; } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
   </style>
 </head>
 <body>
@@ -831,6 +844,30 @@ def _render_live_console() -> str:
           <div class="director-card"><span class="label">现在</span><b id="director-now">照着下一句讲</b></div>
           <div class="director-card"><span class="label">接下来</span><b id="director-next">观察 30 秒数据</b></div>
           <div class="director-card"><span class="label">别做</span><b id="director-avoid">别自己乱切品</b></div>
+        </section>
+        <section class="execution-grid">
+          <div class="switch-card">
+            <span class="label">商品切换倒计时</span>
+            <div class="switch-metrics">
+              <div class="switch-metric"><span class="label">疲劳度</span><b id="fatigue-score">--</b></div>
+              <div class="switch-metric"><span class="label">还能讲</span><b id="time-left">--</b></div>
+              <div class="switch-metric"><span class="label">推荐切换</span><b id="switch-product">--</b></div>
+              <div class="switch-metric"><span class="label">预计提升</span><b id="gmv-lift">--</b></div>
+            </div>
+            <div class="transition-line" id="transition-line">等数据稳定后再决定是否切品。</div>
+          </div>
+          <div class="comment-priority">
+            <span class="label">当前最值得回复</span>
+            <div class="comment-list" id="priority-comments"><div class="comment-item">等待直播评论...</div></div>
+          </div>
+        </section>
+        <section class="push-mode" id="push-mode">
+          🔥 Push Mode：少讲参数，强调价格、库存、颜色和尺码。
+          <ul>
+            <li>黑色/热门码先锁</li>
+            <li>别拉长解释，直接承接成交势能</li>
+            <li>用“现在有人下单”制造紧迫感</li>
+          </ul>
         </section>
         <section class="panel sticky-action">
           <span class="label">主播操作台</span>
@@ -1001,6 +1038,68 @@ def _render_live_console() -> str:
       if (text.includes("no valid") || text.includes("数据不完整")) return ["等数据补齐", "先稳住互动", "别根据缺失指标切品"];
       return ["继续讲当前款", nextProduct ? "准备：" + nextProduct : "观察 30 秒数据", "别讲太散"];
     }
+    function transitionSentence(action, nextProduct) {
+      const text = String(action || "").toLowerCase();
+      const target = nextProduct || "下一件";
+      if (text.includes("switch")) return "这件大家已经看得差不多了，我马上给大家上一个更值得抢的：" + target + "。";
+      if (text.includes("push")) return "先不切，这件现在有成交势能，黑色和热门码合适的先锁。";
+      if (text.includes("value") || text.includes("price")) return "先别切，我把值不值讲清楚，讲完马上给大家看下一件。";
+      return "这件再讲一小段，数据一掉就切到：" + target + "。";
+    }
+    function switchSecondsLeft(fatigue) {
+      const value = Number(fatigue || 0);
+      if (!Number.isFinite(value) || value <= 0) return "--";
+      return Math.max(8, Math.min(120, Math.round((100 - value) * 2.1))) + "秒";
+    }
+    function gmvLiftText(data, fatigue) {
+      const recommendation = data.switch_recommendation || {};
+      const current = Number(recommendation.current_expected_gmv || 0);
+      const next = Number(recommendation.recommended_expected_gmv || 0);
+      if (current > 0 && next > current) return "+" + Math.round((next - current) / current * 100) + "%";
+      const estimate = Math.max(8, Math.min(28, Math.round(Number(fatigue || 40) * 0.22)));
+      return "+" + estimate + "%";
+    }
+    function isPushMode(data) {
+      const action = String(data.current_action || "").toLowerCase();
+      const snapshot = data.snapshot || {};
+      return action.includes("push") || (
+        Number(snapshot.ipv_uv_rate || 0) >= 0.08
+        && Number(snapshot.pay_byr_rate || 0) >= 0.02
+        && Number(snapshot.pay_amt || 0) > 0
+      );
+    }
+    function classifyComment(comment) {
+      const text = String(comment || "");
+      if (/175|170|180|尺码|穿啥|多大|kg|斤|身高|体重/.test(text)) return { action: "讲尺码", confidence: 92, reply: "175/70 正常 M，里面加卫衣建议 L。" };
+      if (/真假|正品|真的假的|吊牌|洗标/.test(text)) return { action: "展示正品细节", confidence: 90, reply: "真假别听我空说，镜头拉近看吊牌、洗标、拉链和走线。" };
+      if (/黑色|白色|颜色|色差|有码|还有吗/.test(text)) return { action: "展示颜色/库存", confidence: 84, reply: "想看黑色扣3，我等下直接拿近镜头给你看色差和细节。" };
+      if (/值|贵|价格|多少钱|划算/.test(text)) return { action: "解释价格价值", confidence: 86, reply: "别光看价格，通勤能穿、场景多，买回去不会吃灰。" };
+      return { action: "短答互动", confidence: 68, reply: "这个问题我先记一下，具体尺码和颜色直接打出来。" };
+    }
+    function priorityComments() {
+      const input = document.getElementById("comments");
+      const comments = (input ? input.value : "").split("\\n").map((line) => line.trim()).filter(Boolean);
+      const weight = (item) => {
+        if (item.action === "讲尺码") return 100;
+        if (item.action === "展示正品细节") return 95;
+        if (item.action === "解释价格价值") return 88;
+        if (item.action === "展示颜色/库存") return 82;
+        return 50;
+      };
+      return comments.map((comment) => ({ comment, ...classifyComment(comment) }))
+        .sort((a, b) => weight(b) - weight(a))
+        .slice(0, 3);
+    }
+    function renderPriorityComments() {
+      const node = document.getElementById("priority-comments");
+      if (!node) return;
+      const items = priorityComments();
+      if (!items.length) {
+        node.innerHTML = '<div class="comment-item">等待直播评论...</div>';
+        return;
+      }
+      node.innerHTML = items.map((item, index) => '<div class="comment-item"><b>' + (index + 1) + '. ' + escapeHtml(item.comment) + '</b><div>' + escapeHtml(item.reply) + '</div><div class="comment-meta">动作：' + escapeHtml(item.action) + ' · 置信度 ' + item.confidence + '%</div></div>').join("");
+    }
     function nextSentence(action, nextAction) {
       const text = String(action || "").toLowerCase();
       if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
@@ -1139,6 +1238,7 @@ def _render_live_console() -> str:
       const snapshot = data.snapshot || {};
       const action = normalizeAction(data.current_action);
       const plan = directorPlan(data.current_action, data.recommended_next_product);
+      const fatigue = Number((data.product_health || {}).fatigue_score || 0);
       document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
       document.getElementById("current-action").textContent = action;
       const sentence = nextSentence(data.current_action, data.next_action);
@@ -1147,6 +1247,12 @@ def _render_live_console() -> str:
       document.getElementById("director-now").textContent = plan[0];
       document.getElementById("director-next").textContent = plan[1];
       document.getElementById("director-avoid").textContent = plan[2];
+      document.getElementById("fatigue-score").textContent = fatigue ? String(Math.round(fatigue)) : "--";
+      document.getElementById("time-left").textContent = switchSecondsLeft(fatigue);
+      document.getElementById("switch-product").textContent = data.recommended_next_product || "等待商品池";
+      document.getElementById("gmv-lift").textContent = gmvLiftText(data, fatigue);
+      document.getElementById("transition-line").textContent = transitionSentence(data.current_action, data.recommended_next_product);
+      document.getElementById("push-mode").classList.toggle("show", isPushMode(data));
       document.getElementById("host-id-label").textContent = data.host_id || hostId();
       document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
       document.getElementById("online-uv").textContent = fmtNumber(snapshot.online_uv);
@@ -1161,6 +1267,7 @@ def _render_live_console() -> str:
       updateProductTimer((snapshot.current_product || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品"));
       renderTimeline(data.timeline || []);
       renderQueue(data);
+      renderPriorityComments();
       updateChecklist();
       maybeSpeakDecision(data, action, sentence);
     }
@@ -1212,6 +1319,7 @@ def _render_live_console() -> str:
       const node = document.getElementById("comment-replies");
       const comments = input.value.split("\\n").map((line) => line.trim()).filter(Boolean).slice(0, 6);
       node.innerHTML = comments.map((comment) => '<div class="reply"><b>' + escapeHtml(comment) + '</b><div>' + escapeHtml(answerComment(comment)) + '</div></div>').join("");
+      renderPriorityComments();
       updateChecklist();
     }
     async function copyNextSentence() {
