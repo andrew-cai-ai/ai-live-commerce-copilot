@@ -778,10 +778,14 @@ def _render_live_console() -> str:
     details.panel[open] > summary:after { content: "收起"; }
     details.panel > .panel-body { padding: 0 16px 16px; }
     .operator-note { border: 1px solid rgba(12, 107, 88, .18); background: #eef8f3; color: var(--accent); border-radius: 10px; padding: 12px; font-weight: 900; }
+    .director-strip { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .director-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--panel); min-height: 92px; }
+    .director-card b { display: block; font-size: 19px; margin-top: 5px; }
+    .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: var(--accent-soft); color: var(--accent); font-weight: 950; }
     .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
-    @media (max-width: 900px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
+    @media (max-width: 900px) { .cards, .director-strip { grid-template-columns: 1fr; } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
   </style>
 </head>
 <body>
@@ -800,9 +804,10 @@ def _render_live_console() -> str:
     <section class="layout">
       <div>
         <section class="panel hero">
-          <span class="label">AI Data Decision</span>
+          <span class="mode-pill" id="director-mode">等待数据模式</span>
+          <span class="label">AI 导演决策</span>
           <div class="action" id="current-action">等待数据</div>
-          <span class="label">Data-based next sentence</span>
+          <span class="label">下一句直接念</span>
           <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
           <div class="reason" id="reason">--</div>
           <div class="quick-actions">
@@ -817,6 +822,11 @@ def _render_live_console() -> str:
           <div class="card"><span class="label">GMV</span><b id="pay-amt">--</b></div>
           <div class="card"><span class="label">热度</span><b id="heat-score">--</b></div>
           <div class="card" id="product-timer"><span class="label">当前商品时长</span><b id="product-elapsed">00:00</b></div>
+        </section>
+        <section class="director-strip">
+          <div class="director-card"><span class="label">现在</span><b id="director-now">照着下一句讲</b></div>
+          <div class="director-card"><span class="label">接下来</span><b id="director-next">观察 30 秒数据</b></div>
+          <div class="director-card"><span class="label">别做</span><b id="director-avoid">别自己乱切品</b></div>
         </section>
         <section class="panel sticky-action">
           <span class="label">主播操作台</span>
@@ -961,6 +971,27 @@ def _render_live_console() -> str:
       if (text.includes("continue")) return "继续讲";
       return text || "等待数据";
     }
+    function directorModeLabel(mode) {
+      const text = String(mode || "").toLowerCase();
+      if (text.includes("hot")) return "热卖模式";
+      if (text.includes("rescue")) return "救场模式";
+      if (text.includes("opening")) return "开场拉流模式";
+      if (text.includes("closing")) return "收口成交模式";
+      if (text.includes("dropping")) return "流量下滑模式";
+      if (text.includes("growth")) return "流量上涨模式";
+      if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
+      return mode || "实时导演模式";
+    }
+    function directorPlan(action, nextProduct) {
+      const text = String(action || "").toLowerCase();
+      if (text.includes("switch")) return ["收口当前款", nextProduct ? "切到：" + nextProduct : "切到下一件", "别继续讲参数"];
+      if (text.includes("push")) return ["加速逼单", "强调尺码和库存", "别拉长解释"];
+      if (text.includes("value") || text.includes("price")) return ["解释值不值", "讲通勤/高频场景", "别只报价格"];
+      if (text.includes("sizing")) return ["回答尺码", "让观众报身高体重", "别跳过尺码问题"];
+      if (text.includes("authenticity")) return ["展示吊牌洗标", "镜头拉近细节", "别空口保证"];
+      if (text.includes("no valid") || text.includes("数据不完整")) return ["等数据补齐", "先稳住互动", "别根据缺失指标切品"];
+      return ["继续讲当前款", nextProduct ? "准备：" + nextProduct : "观察 30 秒数据", "别讲太散"];
+    }
     function nextSentence(action, nextAction) {
       const text = String(action || "").toLowerCase();
       if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
@@ -1051,9 +1082,14 @@ def _render_live_console() -> str:
     function renderDecision(data) {
       const snapshot = data.snapshot || {};
       const action = normalizeAction(data.current_action);
+      const plan = directorPlan(data.current_action, data.recommended_next_product);
+      document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
       document.getElementById("current-action").textContent = action;
       document.getElementById("next-sentence").textContent = nextSentence(data.current_action, data.next_action);
       document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
+      document.getElementById("director-now").textContent = plan[0];
+      document.getElementById("director-next").textContent = plan[1];
+      document.getElementById("director-avoid").textContent = plan[2];
       document.getElementById("host-id-label").textContent = data.host_id || hostId();
       document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
       document.getElementById("online-uv").textContent = fmtNumber(snapshot.online_uv);
@@ -1278,6 +1314,7 @@ def _render_live_prompter() -> str:
     .boss-alert { display: none; border: 1px solid rgba(251, 191, 36, .36); background: rgba(251, 191, 36, .10); color: #fde68a; border-radius: 14px; padding: 14px; margin-bottom: 16px; font-size: clamp(20px, 2.4vw, 34px); font-weight: 950; line-height: 1.12; }
     .boss-alert.show { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
     .boss-alert button { background: #fde68a; color: #713f12; border: 0; white-space: nowrap; font-size: 16px; font-weight: 950; }
+    .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: rgba(94, 234, 212, .10); color: var(--accent); border: 1px solid var(--line); font-weight: 950; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1301,9 +1338,10 @@ def _render_live_prompter() -> str:
     </section>
     <section class="stage">
       <section class="main-card">
-        <span class="label">AI Data Decision</span>
+        <span class="mode-pill" id="prompter-mode">等待数据模式</span>
+        <span class="label">AI 导演决策</span>
         <div class="action" id="prompter-action">等待真实数据</div>
-        <span class="label">Data-based next sentence</span>
+        <span class="label">下一句直接念</span>
         <div class="sentence" id="prompter-sentence">打开淘宝直播中控页，确认插件正在捕获实时数据。</div>
         <div class="reason" id="prompter-reason">没有真实指标时，这里不会给主播乱下指令。</div>
         <div class="prompter-actions">
@@ -1385,6 +1423,17 @@ def _render_live_prompter() -> str:
       if (text.includes("continue")) return "继续讲";
       return action || "等待数据";
     }
+    function directorModeLabel(mode) {
+      const text = String(mode || "").toLowerCase();
+      if (text.includes("hot")) return "热卖模式";
+      if (text.includes("rescue")) return "救场模式";
+      if (text.includes("opening")) return "开场拉流模式";
+      if (text.includes("closing")) return "收口成交模式";
+      if (text.includes("dropping")) return "流量下滑模式";
+      if (text.includes("growth")) return "流量上涨模式";
+      if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
+      return mode || "实时导演模式";
+    }
     function actionTone(action) {
       const text = String(action || "").toLowerCase();
       if (text.includes("switch") || text.includes("no valid") || text.includes("等待")) return "danger";
@@ -1456,6 +1505,7 @@ def _render_live_prompter() -> str:
       const rawAction = data.current_action || "";
       const action = normalizeAction(rawAction);
       const actionNode = document.getElementById("prompter-action");
+      document.getElementById("prompter-mode").textContent = directorModeLabel(data.livestream_mode);
       actionNode.textContent = action;
       actionNode.classList.remove("warn", "danger");
       const tone = actionTone(rawAction || action);
