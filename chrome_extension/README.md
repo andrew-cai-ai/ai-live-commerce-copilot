@@ -12,6 +12,8 @@ The extension sends live metrics to the Render app first:
 
 `POST https://ai-live-commerce-copilot.onrender.com/api/live-ingest`
 
+If the backend sets `LIVE_INGEST_TOKEN`, enter the same token in the extension popup. The connector sends it as `X-Live-Ingest-Token`.
+
 If cloud posting fails, it falls back to local development endpoints:
 
 - `POST http://localhost:8000/api/live-ingest`

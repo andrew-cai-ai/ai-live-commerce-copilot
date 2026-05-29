@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from fastapi.testclient import TestClient
@@ -29,6 +30,7 @@ class ModelApiTests(unittest.TestCase):
         self.assertIn(payload["status"], {"trained", "not_enough_data"})
 
     def test_live_ingest_endpoint_accepts_extension_payload(self) -> None:
+        os.environ.pop("LIVE_INGEST_TOKEN", None)
         response = self.client.post("/api/live-ingest", json={
             "source": "chrome_extension",
             "host_id": "api-test",
@@ -50,6 +52,37 @@ class ModelApiTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["source"], "chrome_extension")
         self.assertEqual(payload["host_id"], "api-test")
+
+    def test_live_ingest_rejects_invalid_json(self) -> None:
+        os.environ.pop("LIVE_INGEST_TOKEN", None)
+        response = self.client.post(
+            "/api/live-ingest",
+            content="{bad-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_json")
+
+    def test_live_ingest_token_when_configured(self) -> None:
+        previous = os.environ.get("LIVE_INGEST_TOKEN")
+        os.environ["LIVE_INGEST_TOKEN"] = "test-token"
+        try:
+            payload = {
+                "source": "chrome_extension",
+                "host_id": "token-test",
+                "liveId": "token-test",
+                "metrics": {"online_uv": 1, "uv": 1, "heat_score": 1},
+            }
+            rejected = self.client.post("/api/live-ingest", json=payload)
+            self.assertEqual(rejected.status_code, 401)
+            accepted = self.client.post("/api/live-ingest", json=payload, headers={"X-Live-Ingest-Token": "test-token"})
+            self.assertEqual(accepted.status_code, 200)
+            self.assertTrue(accepted.json()["ok"])
+        finally:
+            if previous is None:
+                os.environ.pop("LIVE_INGEST_TOKEN", None)
+            else:
+                os.environ["LIVE_INGEST_TOKEN"] = previous
 
 
 if __name__ == "__main__":

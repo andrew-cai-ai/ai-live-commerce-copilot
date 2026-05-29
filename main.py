@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import io
+import os
 import time
 import csv
 import json
@@ -12,7 +13,7 @@ import zipfile
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from report import generate_product_reports, render_report_page
 from app.services.audience_questions import answer_audience_questions
@@ -379,12 +380,14 @@ async def ack_live_boss_intervention(request: Request) -> dict[str, Any]:
 
 @app.post("/live-metrics")
 async def live_metrics(request: Request) -> dict[str, Any]:
+    if not _ingest_token_valid(request):
+        return JSONResponse({"ok": False, "error": "invalid_ingest_token"}, status_code=401)
     try:
         payload = await request.json()
     except Exception:
-        payload = {}
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
     if not isinstance(payload, dict):
-        payload = {}
+        return JSONResponse({"ok": False, "error": "payload_must_be_object"}, status_code=400)
     decision = live_data_connector.ingest_live_metrics(payload)
     return {
         "ok": True,
@@ -399,12 +402,14 @@ async def live_metrics(request: Request) -> dict[str, Any]:
 
 @app.post("/api/live-ingest")
 async def live_ingest(request: Request) -> dict[str, Any]:
+    if not _ingest_token_valid(request):
+        return JSONResponse({"ok": False, "error": "invalid_ingest_token"}, status_code=401)
     try:
         payload = await request.json()
     except Exception:
-        payload = {}
+        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
     if not isinstance(payload, dict):
-        payload = {}
+        return JSONResponse({"ok": False, "error": "payload_must_be_object"}, status_code=400)
     decision = live_data_connector.ingest_live_metrics(payload)
     return {
         "ok": True,
@@ -416,6 +421,16 @@ async def live_ingest(request: Request) -> dict[str, Any]:
         "snapshot_count": len(live_data_connector.snapshots),
         "last_updated": decision.snapshot.timestamp,
     }
+
+
+def _ingest_token_valid(request: Request) -> bool:
+    expected = os.getenv("LIVE_INGEST_TOKEN", "").strip()
+    if not expected:
+        return True
+    header_token = request.headers.get("X-Live-Ingest-Token", "").strip()
+    authorization = request.headers.get("Authorization", "").strip()
+    bearer_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    return header_token == expected or bearer_token == expected
 
 
 @app.get("/download/chrome-extension")

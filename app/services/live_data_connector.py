@@ -507,7 +507,7 @@ class LiveDataConnector:
             online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv")),
             uv=_to_number(_pick(total_stats, "uv")),
             pv=_to_number(_pick(total_stats, "pv")),
-            stay_time_pu=_to_number(_pick(total_stats, "stay_time_pu", "stayTimePu", "watch_duration") or _pick(data_region, "look_time_5min_avg_d_live")),
+            stay_time_pu=_to_number(_pick(total_stats, "stay_time_pu", "stayTimePu")),
             heat_score=_to_number(_pick(total_stats, "heat_score", "heatScore")),
             ipv_uv_rate=ipv_uv_rate,
             pay_byr_rate=pay_byr_rate,
@@ -532,10 +532,10 @@ class LiveDataConnector:
             live_pay_amt_5min=pay_amt_5min_d_live,
             shop_pay_amt=pay_amt_td_d_shop,
             shop_pay_amt_5min=pay_amt_5min_d_shop,
-            item_click_rate=_normalize_rate(_pick(data, "item_click_rate", "itemClickRate") or ipv_uv_rate),
-            item_conversion_rate=_normalize_rate(_pick(data, "item_conversion_rate", "itemConversionRate") or pay_byr_rate),
+            item_click_rate=_normalize_rate(_pick(data, "item_click_rate", "itemClickRate")),
+            item_conversion_rate=_normalize_rate(_pick(data, "item_conversion_rate", "itemConversionRate")),
             item_add_cart_rate=_normalize_rate(_pick(data, "item_add_cart_rate", "itemAddCartRate", "cart_rate")),
-            item_gmv=_to_number(_pick(data, "item_gmv", "itemGmv") or _pick(data_region, "pay_amt_5min_d_live") or _pick(total_stats, "pay_amt")),
+            item_gmv=_to_number(_pick(data, "item_gmv", "itemGmv")),
             current_product=str(_pick(data, "current_product", "item_name", "itemName") or _best_event_title(events)).strip(),
             product_level_connected=explicit_product_metrics,
             product_events=events,
@@ -1170,6 +1170,14 @@ def _nearest_ai_decision(session: LiveSessionState, timestamp: float) -> dict[st
     }
 
 
+def _product_switched_during_window(action: dict[str, Any], snapshot: LiveMetricSnapshot) -> bool:
+    action_product = str(action.get("product") or "").strip()
+    current_product = str(snapshot.current_product or "").strip()
+    if not action_product or not current_product:
+        return False
+    return action_product != current_product
+
+
 def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapshot) -> None:
     after = _effect_metrics(snapshot)
     if not after:
@@ -1212,6 +1220,7 @@ def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapsh
                 "after_cvr": after.get("cvr"),
                 "product_position": action.get("product_position"),
                 "product_elapsed_seconds": action.get("product_elapsed_seconds"),
+                "product_switched_during_window": _product_switched_during_window(action, snapshot),
             },
         )
         live_training_data.record_sample(
@@ -1228,6 +1237,7 @@ def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapsh
                 "product_elapsed_seconds": action.get("product_elapsed_seconds"),
                 "comments": snapshot.comment_text,
                 "traffic_source": snapshot.source,
+                "product_switched_during_window": _product_switched_during_window(action, snapshot),
             },
         )
 
@@ -1486,6 +1496,7 @@ _ENCODED_VALUE_TYPE_MAP: dict[str, str] = {
     "look_uv_td_d_live": "look_uv_td_d_live",
     "look_uv_5min_d_live": "look_uv_5min_d_live",
     "look_time_td_avg_d_live": "look_time_td_avg_d_live",
+    "look_time_5min_avg_d_live": "look_time_5min_avg_d_live",
     "pay_amt_td_d_live": "pay_amt_td_d_live",
     "pay_amt_5min_d_live": "pay_amt_5min_d_live",
     "pay_amt_td_d_shop": "pay_amt_td_d_shop",

@@ -90,8 +90,11 @@ function loadWorkspaceConfig() {
   chrome.storage.local.get([CONFIG_KEY], (result) => {
     const config = (result && result[CONFIG_KEY]) || {};
     const workspaceId = String(config.workspace_id || "").trim();
+    const ingestToken = String(config.ingest_token || "").trim();
     const input = document.getElementById("workspace-id");
     if (input) input.value = workspaceId;
+    const tokenInput = document.getElementById("ingest-token");
+    if (tokenInput) tokenInput.value = ingestToken;
     setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
     updateStatus({ workspaceId });
   });
@@ -100,14 +103,31 @@ function loadWorkspaceConfig() {
 function saveWorkspaceConfig() {
   const input = document.getElementById("workspace-id");
   const workspaceId = String((input && input.value) || "").trim();
-  const config = { workspace_id: workspaceId, binding_code: workspaceId };
   if (!chrome.storage || !chrome.storage.local) {
     updateStatus({ lastError: "chrome.storage is unavailable. Reload extension and check permissions." }, refresh);
     return;
   }
-  chrome.storage.local.set({ [CONFIG_KEY]: config }, () => {
-    setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
-    updateStatus({ workspaceId, lastError: "" }, refresh);
+  chrome.storage.local.get([CONFIG_KEY], (result) => {
+    const current = (result && result[CONFIG_KEY]) || {};
+    chrome.storage.local.set({ [CONFIG_KEY]: { ...current, workspace_id: workspaceId, binding_code: workspaceId } }, () => {
+      setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
+      updateStatus({ workspaceId, lastError: "" }, refresh);
+    });
+  });
+}
+
+function saveIngestToken() {
+  const input = document.getElementById("ingest-token");
+  const ingestToken = String((input && input.value) || "").trim();
+  if (!chrome.storage || !chrome.storage.local) {
+    updateStatus({ lastError: "chrome.storage is unavailable. Reload extension and check permissions." }, refresh);
+    return;
+  }
+  chrome.storage.local.get([CONFIG_KEY], (result) => {
+    const current = (result && result[CONFIG_KEY]) || {};
+    chrome.storage.local.set({ [CONFIG_KEY]: { ...current, ingest_token: ingestToken } }, () => {
+      updateStatus({ ingestTokenConfigured: Boolean(ingestToken), lastError: "" }, refresh);
+    });
   });
 }
 
@@ -304,6 +324,7 @@ function refresh() {
 
 document.getElementById("inject-now").addEventListener("click", injectCurrentTab);
 document.getElementById("save-workspace").addEventListener("click", saveWorkspaceConfig);
+document.getElementById("save-token").addEventListener("click", saveIngestToken);
 
 document.getElementById("clear-status").addEventListener("click", () => {
   memoryStatus = {};

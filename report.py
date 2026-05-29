@@ -1295,6 +1295,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         look_uv_td_d_live: "look_uv_td_d_live",
         look_uv_5min_d_live: "look_uv_5min_d_live",
         look_time_td_avg_d_live: "look_time_td_avg_d_live",
+        look_time_5min_avg_d_live: "look_time_5min_avg_d_live",
         pay_amt_td_d_live: "pay_amt_td_d_live",
         pay_amt_5min_d_live: "pay_amt_5min_d_live",
         pay_amt_td_d_shop: "pay_amt_td_d_shop",
@@ -1382,10 +1383,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function readAssistantPayload() {
+        const debugLivePayload = window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1";
         const input = document.getElementById("live-assistant-data-input");
         const textareaValue = input ? input.value : "";
         liveDirectorState.hasPastedTextareaContent = !!textareaValue.trim();
-        console.log("textarea value", textareaValue);
+        if (debugLivePayload) console.log("textarea value", textareaValue);
         if (!input || !textareaValue.trim()) {
           return null;
         }
@@ -1394,9 +1396,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           const raw = JSON.parse(normalizedText);
           const payload = normalizeAssistantPayload(raw);
           payload.host_id = payload.host_id || payload.room_id || payload.liveId || liveHostId();
-          console.log("raw payload", raw);
-          console.log("normalized payload", payload);
-          console.log("online_uv", payload && payload.online_uv);
+          if (debugLivePayload) console.log("raw payload", raw);
+          if (debugLivePayload) console.log("normalized payload", payload);
+          if (debugLivePayload) console.log("online_uv", payload && payload.online_uv);
           return payload;
         } catch (error) {
           return { parse_error: true, error_message: error.message };
@@ -1438,7 +1440,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function updateLiveDirectorStateFromTextarea() {
-        console.log("trying pasted payload");
+        const debugLivePayload = window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1";
+        if (debugLivePayload) console.log("trying pasted payload");
         const payload = readAssistantPayload();
         if (payload && payload.parse_error) {
           liveDirectorState.latestPayload = null;
@@ -1886,9 +1889,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             renderConnectorDecision(connectorDecision);
             return;
           }
-          console.log("connector returned no valid live metrics; trying manual fallback");
+          if (window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1") console.log("connector returned no valid live metrics; trying manual fallback");
         } catch (error) {
-          console.log("connector failed; trying manual fallback", error);
+          if (window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1") console.log("connector failed; trying manual fallback", error);
           document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
         }
         const pastedPayload = updateLiveDirectorStateFromTextarea();
@@ -2233,7 +2236,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function renderLiveDecision(metrics) {
         if (metrics.source === "mock" && liveDirectorState.hasPastedTextareaContent) {
-          console.log("mock simulator blocked because pasted payload exists");
+          if (window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1") console.log("mock simulator blocked because pasted payload exists");
           return;
         }
         enrichMetrics(metrics);

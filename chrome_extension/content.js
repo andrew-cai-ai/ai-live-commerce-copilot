@@ -86,6 +86,7 @@
     const payload = event.data.payload || {};
     const config = await getConfig();
     const workspaceId = String(config.workspace_id || config.binding_code || "").trim();
+    const ingestToken = String(config.ingest_token || "").trim();
     if (workspaceId) {
       payload.workspace_id = workspaceId;
       payload.binding_code = workspaceId;
@@ -107,7 +108,9 @@
       try {
         const response = await fetch(endpoint, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: ingestToken
+            ? { "Content-Type": "application/json", "X-Live-Ingest-Token": ingestToken }
+            : { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
         if (response.ok) {
