@@ -274,6 +274,20 @@ async def live_session_meta(request: Request) -> dict[str, Any]:
     return live_data_connector.update_session_metadata(str(host_id), metadata)
 
 
+@app.post("/api/live/host-feedback")
+async def live_host_feedback(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    host_id = body.get("host_id") or body.get("hostId")
+    return live_data_connector.record_host_feedback(str(host_id or ""), body)
+
+
 @app.post("/live-metrics")
 async def live_metrics(request: Request) -> dict[str, Any]:
     try:
@@ -715,6 +729,10 @@ def _render_live_console() -> str:
     .product-cards { display: grid; gap: 8px; margin-top: 10px; }
     .product-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfdfb; }
     .product-card b { display: block; }
+    .quick-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .quick-actions .ghost { background: #e7efeb; color: var(--accent); }
+    .toast { color: var(--accent); font-weight: 900; min-height: 20px; }
+    .sticky-action { position: sticky; bottom: 12px; z-index: 4; margin-top: 14px; border: 1px solid rgba(12, 107, 88, .24); box-shadow: 0 14px 40px rgba(22, 33, 31, .14); }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
   </style>
 </head>
@@ -735,6 +753,12 @@ def _render_live_console() -> str:
           <span class="label">Next sentence</span>
           <div class="sentence" id="next-sentence">打开淘宝直播中控页，并确认插件已捕获数据。</div>
           <div class="reason" id="reason">--</div>
+          <div class="quick-actions">
+            <button id="copy-sentence" type="button">复制下一句</button>
+            <button id="mark-executed" type="button" class="ghost">标记已执行</button>
+            <span class="small">快捷键：C 复制 · E 标记执行</span>
+          </div>
+          <div class="toast" id="host-toast"></div>
         </section>
         <section class="cards">
           <div class="card"><span class="label">当前直播间</span><b id="host-id-label">default</b></div>
@@ -750,6 +774,15 @@ def _render_live_console() -> str:
           <span class="label">当前商品讲解时长</span>
           <b id="product-elapsed">00:00</b>
           <div class="small" id="product-timer-hint">切换商品后自动重新计时。</div>
+        </section>
+        <section class="panel sticky-action">
+          <span class="label">主播操作台</span>
+          <div class="quick-actions">
+            <button id="copy-sentence-sticky" type="button">复制话术</button>
+            <button id="mark-executed-sticky" type="button" class="ghost">我已照做</button>
+            <a href="/live/prompter" id="prompter-link">打开大字屏</a>
+          </div>
+          <div class="small">主播只需要：照着下一句讲，讲完点“我已照做”。</div>
         </section>
       </div>
       <div class="side">
@@ -1044,6 +1077,41 @@ def _render_live_console() -> str:
       node.innerHTML = comments.map((comment) => '<div class="reply"><b>' + escapeHtml(comment) + '</b><div>' + escapeHtml(answerComment(comment)) + '</div></div>').join("");
       updateChecklist();
     }
+    async function copyNextSentence() {
+      const text = document.getElementById("next-sentence").textContent.trim();
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        showHostToast("已复制，主播可以直接念。");
+      } catch (_error) {
+        showHostToast("复制失败，请手动选中文字。");
+      }
+    }
+    async function markExecuted() {
+      const action = document.getElementById("current-action").textContent.trim();
+      const sentence = document.getElementById("next-sentence").textContent.trim();
+      const currentProduct = currentProductName || "";
+      await fetch("/api/live/host-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host_id: hostId(),
+          workspace_id: workspaceId,
+          action,
+          sentence,
+          current_product: currentProduct,
+          source: "host_console"
+        })
+      }).catch(() => {});
+      showHostToast("已记录执行，老板复盘能看到。");
+    }
+    function showHostToast(message) {
+      const node = document.getElementById("host-toast");
+      if (!node) return;
+      node.textContent = message;
+      window.clearTimeout(window.__hostToastTimer);
+      window.__hostToastTimer = window.setTimeout(() => { node.textContent = ""; }, 2500);
+    }
     function setCheck(id, done) {
       const node = document.getElementById(id);
       if (node) node.classList.toggle("done", !!done);
@@ -1060,7 +1128,18 @@ def _render_live_console() -> str:
     document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); saveSessionMeta(); refreshDecision(); });
     document.getElementById("save-session-meta").addEventListener("click", () => { saveSessionMeta(); });
     document.getElementById("comments").addEventListener("input", () => { renderComments(); refreshDecision(); });
+    document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
+    document.getElementById("copy-sentence-sticky").addEventListener("click", copyNextSentence);
+    document.getElementById("mark-executed").addEventListener("click", markExecuted);
+    document.getElementById("mark-executed-sticky").addEventListener("click", markExecuted);
+    document.addEventListener("keydown", (event) => {
+      const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
+      if (target === "input" || target === "textarea") return;
+      if (event.key.toLowerCase() === "c") copyNextSentence();
+      if (event.key.toLowerCase() === "e") markExecuted();
+    });
     setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    if (workspaceId) document.getElementById("prompter-link").href = "/live/prompter?workspace_id=" + encodeURIComponent(workspaceId);
     bindProductList();
     setMode(liveMode);
     refreshSessions(); refreshDecision();
@@ -1115,6 +1194,9 @@ def _render_live_prompter() -> str:
     .tiny { color: var(--muted); font-size: 13px; line-height: 1.45; }
     .controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; }
     .status-line { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-weight: 850; margin-top: 10px; }
+    .prompter-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .prompter-actions .ghost { background: #14201d; color: var(--accent); }
+    .toast { color: var(--accent); font-weight: 950; min-height: 22px; font-size: 18px; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1139,6 +1221,12 @@ def _render_live_prompter() -> str:
         <span class="label">Next sentence</span>
         <div class="sentence" id="prompter-sentence">打开淘宝直播中控页，确认插件正在捕获实时数据。</div>
         <div class="reason" id="prompter-reason">没有真实指标时，这里不会给主播乱下指令。</div>
+        <div class="prompter-actions">
+          <button class="primary" id="copy-sentence" type="button">复制下一句</button>
+          <button class="ghost" id="mark-executed" type="button">我已照做</button>
+          <span class="tiny">快捷键：C 复制 · E 标记执行</span>
+        </div>
+        <div class="toast" id="host-toast"></div>
       </section>
       <aside class="side">
         <section class="panel">
@@ -1321,7 +1409,50 @@ def _render_live_prompter() -> str:
       const rows = [["Now", current || "--"], ["Next", next || "等待推荐"], ["Action", action || "--"]];
       node.innerHTML = rows.map((row) => '<div class="queue-row"><span>' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
     }
+    async function copyNextSentence() {
+      const text = document.getElementById("prompter-sentence").textContent.trim();
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        showHostToast("已复制。");
+      } catch (_error) {
+        showHostToast("复制失败，请手动选中文字。");
+      }
+    }
+    async function markExecuted() {
+      const action = document.getElementById("prompter-action").textContent.trim();
+      const sentence = document.getElementById("prompter-sentence").textContent.trim();
+      const currentProductName = document.getElementById("current-product").textContent.trim();
+      await fetch("/api/live/host-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host_id: hostId(),
+          workspace_id: workspaceId,
+          action,
+          sentence,
+          current_product: currentProductName,
+          source: "host_prompter"
+        })
+      }).catch(() => {});
+      showHostToast("已记录执行。");
+    }
+    function showHostToast(message) {
+      const node = document.getElementById("host-toast");
+      if (!node) return;
+      node.textContent = message;
+      window.clearTimeout(window.__hostToastTimer);
+      window.__hostToastTimer = window.setTimeout(() => { node.textContent = ""; }, 2500);
+    }
     document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
+    document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
+    document.getElementById("mark-executed").addEventListener("click", markExecuted);
+    document.addEventListener("keydown", (event) => {
+      const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
+      if (target === "input" || target === "textarea") return;
+      if (event.key.toLowerCase() === "c") copyNextSentence();
+      if (event.key.toLowerCase() === "e") markExecuted();
+    });
     setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     autoPickFreshHost().then(refreshDecision);
     window.setInterval(refreshDecision, 5000);

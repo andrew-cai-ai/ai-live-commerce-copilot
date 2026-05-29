@@ -166,7 +166,13 @@ class LiveDataConnector:
         rows = []
         for host_id, session in self.sessions.items():
             latest_snapshot = session.snapshots[-1] if session.snapshots else None
-            latest_action = session.action_history[-1] if session.action_history else {}
+            latest_action = next(
+                (
+                    action for action in reversed(session.action_history)
+                    if action.get("event_type") != "host_feedback"
+                ),
+                session.action_history[-1] if session.action_history else {},
+            )
             display_name = _session_display_name(host_id, session.metadata)
             row_workspace_id = _workspace_id_from_session_key(host_id, session.latest_ingested_payload)
             if workspace_filter and row_workspace_id != workspace_filter:
@@ -254,6 +260,30 @@ class LiveDataConnector:
             for host_id, session in self.sessions.items()
         }
         return sorted(workspace for workspace in workspaces if workspace)
+
+    def record_host_feedback(self, host_id: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+        resolved_host_id = _host_id_from_payload(payload, host_id)
+        session = self._session(resolved_host_id)
+        action = str(payload.get("action") or "").strip()[:120] or "已执行 AI 建议"
+        sentence = str(payload.get("sentence") or "").strip()[:240]
+        product = str(payload.get("current_product") or payload.get("product") or "").strip()[:160]
+        entry = {
+            "timestamp": time.time(),
+            "last_seen": time.time(),
+            "decision": "主播已执行",
+            "mode": "Host feedback",
+            "reason": [action, product][:2],
+            "next_action": sentence,
+            "confidence": 1.0,
+            "current_live_score": 0,
+            "trend_signature": (),
+            "repeat_count": 1,
+            "event_type": "host_feedback",
+        }
+        session.action_history.append(entry)
+        session.action_history = session.action_history[-20:]
+        self.action_history = session.action_history
+        return {"ok": True, "host_id": resolved_host_id, "feedback": entry}
 
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
         clean_host_id = _clean_host_id(host_id)
@@ -664,7 +694,7 @@ def _unwrap_payload(payload: Any) -> dict[str, Any]:
 
 def _host_id_from_payload(payload: Any, explicit_host_id: str | None = None) -> str:
     if explicit_host_id and str(explicit_host_id).strip():
-        return _clean_host_id(explicit_host_id)
+        return _session_key(_workspace_id_from_payload(payload), _clean_host_id(explicit_host_id))
     if not isinstance(payload, dict):
         return "default"
     value = (
