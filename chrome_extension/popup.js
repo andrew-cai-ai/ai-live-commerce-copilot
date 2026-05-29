@@ -93,6 +93,8 @@ function loadWorkspaceConfig() {
     const ingestToken = String(config.ingest_token || "").trim();
     const input = document.getElementById("workspace-id");
     if (input) input.value = workspaceId;
+    const apiBaseInput = document.getElementById("api-base-url");
+    if (apiBaseInput) apiBaseInput.value = String(config.api_base_url || "").trim();
     const tokenInput = document.getElementById("ingest-token");
     if (tokenInput) tokenInput.value = ingestToken;
     setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
@@ -112,6 +114,21 @@ function saveWorkspaceConfig() {
     chrome.storage.local.set({ [CONFIG_KEY]: { ...current, workspace_id: workspaceId, binding_code: workspaceId } }, () => {
       setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
       updateStatus({ workspaceId, lastError: "" }, refresh);
+    });
+  });
+}
+
+function saveApiBaseUrl() {
+  const input = document.getElementById("api-base-url");
+  const apiBaseUrl = String((input && input.value) || "").trim();
+  if (!chrome.storage || !chrome.storage.local) {
+    updateStatus({ lastError: "chrome.storage is unavailable. Reload extension and check permissions." }, refresh);
+    return;
+  }
+  chrome.storage.local.get([CONFIG_KEY], (result) => {
+    const current = (result && result[CONFIG_KEY]) || {};
+    chrome.storage.local.set({ [CONFIG_KEY]: { ...current, api_base_url: apiBaseUrl } }, () => {
+      updateStatus({ apiBaseUrl: apiBaseUrl || "", lastError: "" }, refresh);
     });
   });
 }
@@ -324,6 +341,7 @@ function refresh() {
 
 document.getElementById("inject-now").addEventListener("click", injectCurrentTab);
 document.getElementById("save-workspace").addEventListener("click", saveWorkspaceConfig);
+document.getElementById("save-api-base").addEventListener("click", saveApiBaseUrl);
 document.getElementById("save-token").addEventListener("click", saveIngestToken);
 
 document.getElementById("clear-status").addEventListener("click", () => {

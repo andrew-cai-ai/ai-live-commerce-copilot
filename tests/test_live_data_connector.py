@@ -3,7 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from app.services.live_connector import constants as live_constants
+import app.services.live_connector.constants as live_constants
 from app.services.inventory_import import _normalize_taobao_payload
 from app.services.live_data_connector import (
     LATEST_EXTENSION_VERSION,

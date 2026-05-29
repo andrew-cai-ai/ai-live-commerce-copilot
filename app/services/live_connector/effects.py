@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.services.live_connector.analytics import _session_age
 from app.services.live_connector.parsing import _pick
 from app.services.live_connector.types import LiveMetricSnapshot, LiveSessionState
 from app.services.live_training_data import live_training_data

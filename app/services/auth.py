@@ -6,6 +6,9 @@ from hashlib import sha256
 
 from dotenv import load_dotenv
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+
+from app.services.security_utils import safe_compare_digest
 
 load_dotenv()
 
@@ -20,12 +23,24 @@ def is_authenticated(request: Request) -> bool:
     if not auth_enabled():
         return True
     token = request.cookies.get(AUTH_COOKIE_NAME, "")
-    return hmac.compare_digest(token, _auth_token())
+    return safe_compare_digest(token, _auth_token())
 
 
 def password_matches(password: str) -> bool:
     expected = os.getenv("APP_PASSWORD", "")
-    return bool(expected) and hmac.compare_digest(password, expected)
+    if not expected:
+        return False
+    return safe_compare_digest(password, expected)
+
+
+def unauthorized_json() -> JSONResponse:
+    return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+
+def require_api_auth(request: Request) -> JSONResponse | None:
+    if is_authenticated(request):
+        return None
+    return unauthorized_json()
 
 
 def set_auth_cookie(response: Response) -> None:

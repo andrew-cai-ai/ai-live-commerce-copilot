@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hmac
+from app.services.security_utils import safe_compare_digest
 import html
 import io
 import os
@@ -18,7 +18,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 
 from report import generate_product_reports, render_report_page
 from app.services.audience_questions import answer_audience_questions
-from app.services.auth import clear_auth_cookie, is_authenticated, password_matches, set_auth_cookie
+from app.services.auth import (
+    clear_auth_cookie,
+    is_authenticated,
+    password_matches,
+    require_api_auth,
+    set_auth_cookie,
+)
 from app.services.inventory_import import (
     SmartInventoryRow,
     build_inventory_items,
@@ -163,8 +169,9 @@ def boss_dashboard(request: Request) -> str:
 
 @app.get("/api/boss/dashboard")
 async def boss_dashboard_api(request: Request, workspace_id: str = "") -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_data_connector.boss_dashboard(workspace_id=workspace_id or None)
 
 
@@ -240,8 +247,9 @@ def logout() -> RedirectResponse:
 
 @app.post("/api/live/decision")
 async def live_decision(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -258,22 +266,25 @@ async def live_decision(request: Request) -> dict[str, Any]:
 
 @app.get("/api/live/sessions")
 async def live_sessions(request: Request, workspace_id: str = "") -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return {"sessions": live_data_connector.active_sessions(workspace_id=workspace_id or None)}
 
 
 @app.get("/api/live/history")
 async def live_history(request: Request, host_id: str = "default") -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_data_connector.session_history(host_id)
 
 
 @app.get("/api/live/product-playbook")
 async def live_product_playbook(request: Request, product_name: str = "", host_id: str = "default") -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return {
         "product": live_memory.product_profile(product_name),
         "host": live_memory.host_profile(host_id),
@@ -282,36 +293,41 @@ async def live_product_playbook(request: Request, product_name: str = "", host_i
 
 @app.get("/api/model/training-dashboard")
 async def model_training_dashboard(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_training_data.training_data_dashboard()
 
 
 @app.get("/api/model/coverage")
 async def model_coverage(request: Request, product_threshold: int = 30, host_threshold: int = 30) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_training_data.coverage_dashboard(product_threshold, host_threshold)
 
 
 @app.get("/api/model/cold-start")
 async def model_cold_start(request: Request, product_name: str, top_k: int = 3) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_training_data.cold_start_recommendation(product_name, top_k=top_k)
 
 
 @app.get("/api/model/offline-evaluation")
 async def model_offline_evaluation(request: Request, min_quality: int = 70) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_training_data.offline_evaluation(min_quality=min_quality)
 
 
 @app.post("/api/model/train-v0")
 async def model_train_v0(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -323,15 +339,17 @@ async def model_train_v0(request: Request) -> dict[str, Any]:
 
 @app.get("/api/model/readiness")
 async def model_readiness(request: Request, product_threshold: int = 30, host_threshold: int = 30, min_quality: int = 70) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     return live_training_data.model_readiness_summary(product_threshold, host_threshold, min_quality)
 
 
 @app.post("/api/live/session-meta")
 async def live_session_meta(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -345,8 +363,9 @@ async def live_session_meta(request: Request) -> dict[str, Any]:
 
 @app.post("/api/live/host-feedback")
 async def live_host_feedback(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -359,8 +378,9 @@ async def live_host_feedback(request: Request) -> dict[str, Any]:
 
 @app.post("/api/live/boss-intervention")
 async def live_boss_intervention(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -373,16 +393,18 @@ async def live_boss_intervention(request: Request) -> dict[str, Any]:
 
 @app.get("/api/live/boss-intervention")
 async def get_live_boss_intervention(request: Request, host_id: str = "default", workspace_id: str = "") -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     payload = {"workspace_id": workspace_id} if workspace_id else {}
     return live_data_connector.get_boss_intervention(host_id, payload)
 
 
 @app.post("/api/live/boss-intervention/ack")
 async def ack_live_boss_intervention(request: Request) -> dict[str, Any]:
-    if not is_authenticated(request):
-        return {"error": "unauthorized"}
+    denied = require_api_auth(request)
+    if denied:
+        return denied
     try:
         body = await request.json()
     except Exception:
@@ -405,6 +427,8 @@ async def live_ingest(request: Request) -> dict[str, Any] | JSONResponse:
 
 
 async def _handle_live_ingest(request: Request, *, include_last_updated: bool) -> dict[str, Any] | JSONResponse:
+    if not os.getenv("LIVE_INGEST_TOKEN", "").strip() and os.getenv("RENDER", "").strip().lower() == "true":
+        return JSONResponse({"ok": False, "error": "ingest_token_not_configured"}, status_code=503)
     if not _ingest_token_valid(request):
         return JSONResponse({"ok": False, "error": "invalid_ingest_token"}, status_code=401)
     try:
@@ -436,7 +460,7 @@ def _ingest_token_valid(request: Request) -> bool:
     header_token = request.headers.get("X-Live-Ingest-Token", "").strip()
     authorization = request.headers.get("Authorization", "").strip()
     bearer_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-    return hmac.compare_digest(header_token, expected) or hmac.compare_digest(bearer_token, expected)
+    return safe_compare_digest(header_token, expected) or safe_compare_digest(bearer_token, expected)
 
 
 @app.get("/download/chrome-extension")

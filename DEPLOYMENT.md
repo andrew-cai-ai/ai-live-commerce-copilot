@@ -94,6 +94,8 @@ Set `APP_COOKIE_SECURE=true` on HTTPS deployments (Render sets this in `render.y
 
 For any public deployment, set a strong `LIVE_INGEST_TOKEN` and configure the same value in the Chrome extension popup before going live.
 
+On Render (`RENDER=true`), ingest requests are rejected with HTTP 503 until `LIVE_INGEST_TOKEN` is configured in the dashboard.
+
 ## Current production notes
 
 - The app is suitable for MVP/internal/customer pilot usage.

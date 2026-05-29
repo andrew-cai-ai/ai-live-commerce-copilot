@@ -4,11 +4,25 @@
   }
   window.__aiLiveDirectorContentInjected = true;
 
-  const INGEST_ENDPOINTS = [
-    "https://ai-live-commerce-copilot.onrender.com/api/live-ingest",
+  const DEFAULT_INGEST_ENDPOINTS = [
     "http://localhost:8000/api/live-ingest",
-    "http://127.0.0.1:8000/api/live-ingest"
+    "http://127.0.0.1:8000/api/live-ingest",
+    "https://ai-live-commerce-copilot.onrender.com/api/live-ingest"
   ];
+
+  function ingestEndpoints(config) {
+    const custom = String(config.api_base_url || "").trim().replace(/\/$/, "");
+    const endpoints = [];
+    if (custom) {
+      endpoints.push(`${custom}/api/live-ingest`);
+    }
+    for (const endpoint of DEFAULT_INGEST_ENDPOINTS) {
+      if (!endpoints.includes(endpoint)) {
+        endpoints.push(endpoint);
+      }
+    }
+    return endpoints;
+  }
   const EXTENSION_VERSION = chrome.runtime && chrome.runtime.getManifest
     ? chrome.runtime.getManifest().version
     : "unknown";
@@ -104,7 +118,8 @@
     });
 
     let lastError = "";
-    for (const endpoint of INGEST_ENDPOINTS) {
+    const endpoints = ingestEndpoints(config);
+    for (const endpoint of endpoints) {
       try {
         const response = await fetch(endpoint, {
           method: "POST",

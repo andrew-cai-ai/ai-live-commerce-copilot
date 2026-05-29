@@ -1,26 +1,26 @@
 from __future__ import annotations
 
+import logging
 import os
-import re
 import time
-from urllib.parse import unquote
-from dataclasses import dataclass, field
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from app.services.live_memory import director_brief, live_memory
+from app.services.live_memory import live_memory
 from app.services.live_training_data import _clean_action_code
 
 load_dotenv()
 
-from app.services.live_memory import live_memory
+logger = logging.getLogger(__name__)
+
 from app.services.live_connector.analytics import (
     _active_boss_intervention,
     _boss_risk_card,
     _boss_room_card,
     _host_feedback_stats,
     _post_live_summary,
+    _session_age,
     _session_display_name,
     _snapshot_summary,
     _version_lt,
@@ -36,12 +36,12 @@ from app.services.live_connector.director import (
 )
 from app.services.live_connector.parsing import (
     _clean_host_id,
+    _clean_workspace_id,
     _comment_text,
     _find_dict,
     _find_value,
     _host_id_from_payload,
     _missing_required_metrics,
-    _mock_payload,
     _normalize_ingested_payload,
     _normalize_rate,
     _overlay_live_context,
@@ -69,7 +69,6 @@ from app.services.live_connector.types import (
     LiveDecision,
     LiveMetricSnapshot,
     LiveSessionState,
-    ProductEvent,
 )
 
 class LiveDataConnector:
@@ -420,8 +419,9 @@ class LiveDataConnector:
                 normalized_payload = _normalize_ingested_payload(response.json())
                 resolved_host_id = _host_id_from_payload(normalized_payload, host_id)
                 return _unwrap_payload(normalized_payload), "real_api", resolved_host_id
-            except Exception as exc:
-                warnings.append(f"Live metrics API failed, using fallback data: {exc}")
+            except Exception:
+                logger.exception("Live metrics API request failed for %s", self.api_url)
+                warnings.append("Live metrics API failed; using cached or empty metrics")
 
         warnings.append("No live metrics connector data found.")
         return {}, "no_connector", host_id

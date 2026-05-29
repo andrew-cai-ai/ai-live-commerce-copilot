@@ -157,6 +157,11 @@
         <input id="workspace-id" placeholder="例如 boss-a 或 store-01">
         <button id="save-workspace" type="button">保存</button>
       </div>
+      <label for="api-base-url">API 地址（可选）</label>
+      <div class="config-row">
+        <input id="api-base-url" placeholder="例如 http://localhost:8000">
+        <button id="save-api-base" type="button">保存</button>
+      </div>
       <label for="ingest-token">Ingest Token（可选）</label>
       <div class="config-row">
         <input id="ingest-token" placeholder="云端设置 LIVE_INGEST_TOKEN 后填写">
@@ -195,7 +200,7 @@
       <div class="row"><span>Manual inject</span><b id="manual-inject">--</b></div>
       <div class="row"><span>Error</span><b id="error">--</b></div>
     </div>
-    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页；插件会优先发送到 Render 云端，失败时再尝试本地 localhost。</div>
+    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页；默认先连本地 localhost:8000，可在上方填写云端 API 地址。</div>
     <button id="clear-status">清空状态</button>
     <script src="popup.js"></script>
   </body>

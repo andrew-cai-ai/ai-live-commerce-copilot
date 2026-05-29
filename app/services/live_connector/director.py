@@ -10,7 +10,7 @@ from app.services.live_training_data import (
     infer_product_dna,
     live_training_data,
 )
-from app.services.live_connector import constants
+import app.services.live_connector.constants as live_constants
 from app.services.live_connector.types import LiveDecision, LiveMetricSnapshot, ProductEvent
 
 def _apply_product_playbook(next_action: str, playbook: dict[str, Any], current_action: str) -> str:
@@ -420,7 +420,7 @@ def decide(
         )
         if model_prediction.get("status") == "predicted":
             model_confidence = float(model_prediction.get("confidence") or 0.0)
-            if model_confidence >= constants.MODEL_V0_MIN_CONFIDENCE:
+            if model_confidence >= live_constants.MODEL_V0_MIN_CONFIDENCE:
                 action_code = str(model_prediction.get("action_code") or "A007")
                 current_action, next_action = _action_code_directive(action_code)
                 confidence = max(confidence, model_confidence)
@@ -433,7 +433,7 @@ def decide(
                 action_code = "A007"
                 current_action, next_action = _action_code_directive(action_code)
                 reason = [
-                    f"model_v0 low confidence: {model_confidence:.2f} < {constants.MODEL_V0_MIN_CONFIDENCE:.2f}",
+                    f"model_v0 low confidence: {model_confidence:.2f} < {live_constants.MODEL_V0_MIN_CONFIDENCE:.2f}",
                     *_top_metric_reasons(snapshot, trend_30s, trend_60s)[:2],
                 ]
         else:
@@ -452,7 +452,7 @@ def decide(
         if model_hint.get("status") == "predicted":
             hint_code = str(model_hint.get("action_code") or "")
             hint_confidence = float(model_hint.get("confidence") or 0.0)
-            if hint_code and hint_code != action_code and hint_confidence >= constants.MODEL_V0_MIN_CONFIDENCE:
+            if hint_code and hint_code != action_code and hint_confidence >= live_constants.MODEL_V0_MIN_CONFIDENCE:
                 decision_warnings.append(
                     "model_v0 suggests "
                     f"{hint_code} ({model_hint.get('action_name') or ''}) "
