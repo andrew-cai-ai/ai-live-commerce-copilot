@@ -98,6 +98,7 @@
       hostId: payload.host_id || payload.liveId || "",
       liveId: payload.liveId || "",
       metricKeys: Object.keys(payload.metrics || {}),
+      payloadSections: payload.payload_sections || {},
       eventCount: Array.isArray(payload.events) ? payload.events.length : 0
     });
 

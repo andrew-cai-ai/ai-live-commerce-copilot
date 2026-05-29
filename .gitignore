@@ -8,4 +8,5 @@ __pycache__/
 .cache/
 data/reports/
 data/fx_rate_cache.json
+data/live_memory.json
 outputs/

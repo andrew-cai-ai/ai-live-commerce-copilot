@@ -42,6 +42,13 @@ function render(status) {
   setText("workspace-label", status.workspaceId || "--", status.workspaceId ? "good" : "");
   setText("live-id", status.liveId || "--");
   setText("extension-version", status.extensionVersion || "--");
+  const sections = status.payloadSections || {};
+  const totalStats = yesNo(sections.totalStats);
+  const dataRegion = yesNo(sections.dataRegion);
+  const interactSecKill = yesNo(sections.interactSecKill);
+  setText("section-totalStats", totalStats[0], totalStats[1]);
+  setText("section-dataRegion", dataRegion[0], dataRegion[1]);
+  setText("section-interactSecKill", interactSecKill[0], interactSecKill[1]);
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");

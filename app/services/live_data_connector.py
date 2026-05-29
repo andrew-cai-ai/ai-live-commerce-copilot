@@ -9,6 +9,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from app.services.live_memory import director_brief, live_memory
 
 load_dotenv()
 
@@ -91,6 +92,7 @@ class LiveDecision:
     product_level_connected: bool
     livestream_mode: str
     product_health: dict[str, Any]
+    product_playbook: dict[str, Any]
     switch_recommendation: dict[str, Any]
     comment_clusters: dict[str, Any]
     learned_recommendations: list[str]
@@ -241,6 +243,10 @@ class LiveDataConnector:
             "action_effects": _action_effects(session.action_history),
             "action_leaderboard": _action_leaderboard(session.action_history),
             "director_score_card": _director_score_card(session.action_history),
+            "host_profile": live_memory.host_profile(clean_host_id),
+            "product_profile": live_memory.product_profile(
+                session.snapshots[-1].current_product if session.snapshots else ""
+            ),
             "post_live_summary": _post_live_summary(
                 [_snapshot_summary(snapshot) for snapshot in session.snapshots[-120:]],
                 list(reversed(session.action_history[-30:])),
@@ -578,6 +584,7 @@ class LiveDataConnector:
         product_level_connected = _has_product_level_metrics(snapshot)
         recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
         product_health = _product_health(snapshot, trend_30s, trend_60s)
+        product_playbook = director_brief(snapshot.current_product)
         comment_clusters = _comment_clusters(snapshot, snapshot.comment_text or _comment_text_from_snapshot(snapshot))
         switch_recommendation = _switch_recommendation(snapshot, trend_60s, products)
         livestream_mode = _livestream_mode(snapshot, trend_30s, current_live_score)
@@ -649,6 +656,8 @@ class LiveDataConnector:
         else:
             reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
+        next_action = _apply_product_playbook(next_action, product_playbook, current_action)
+
         return LiveDecision(
             valid_live_metrics=valid_live_metrics,
             current_live_score=current_live_score,
@@ -659,6 +668,7 @@ class LiveDataConnector:
             product_level_connected=product_level_connected,
             livestream_mode=livestream_mode,
             product_health=product_health,
+            product_playbook=product_playbook,
             switch_recommendation=switch_recommendation,
             comment_clusters=comment_clusters,
             learned_recommendations=learned_recommendations,
@@ -1140,6 +1150,13 @@ def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapsh
         action["effect_status"] = "done"
         action["effect_result"] = "有效" if score >= 0 else "无效"
         action["effect_summary"] = _effect_summary(delta)
+        live_memory.record_action_effect(
+            host_id=snapshot.host_id,
+            product_name=str(action.get("product") or snapshot.current_product or ""),
+            action=str(action.get("action_label") or action.get("reason", ["已执行 AI 建议"])[0]),
+            delta=delta,
+            result=str(action["effect_result"]),
+        )
 
 
 def _effect_score(delta: dict[str, float]) -> float:
@@ -1561,6 +1578,25 @@ def _comment_text(data: dict[str, Any]) -> str:
     if isinstance(raw, list):
         return "\n".join(str(item) for item in raw)
     return str(raw)
+
+
+def _apply_product_playbook(next_action: str, playbook: dict[str, Any], current_action: str) -> str:
+    if not playbook:
+        return next_action
+    action_text = current_action.lower()
+    if "switch" in action_text or "no valid" in action_text or "数据不完整" in current_action:
+        return next_action
+    sequence = playbook.get("sequence") if isinstance(playbook.get("sequence"), list) else []
+    first_step = str(sequence[0]) if sequence else ""
+    conversion_line = str(playbook.get("conversion_line") or "").strip()
+    if "sizing" in action_text or "尺码" in current_action:
+        return f"按商品打法先讲{first_step or '尺码'}：{conversion_line or next_action}"
+    if "push" in action_text:
+        return conversion_line or next_action
+    if "continue" in action_text:
+        flow = " → ".join(str(item) for item in sequence[:4] if item)
+        return f"按商品打法讲：{flow}。{conversion_line or next_action}"
+    return next_action
 
 
 def _count_authenticity_comments(text: str) -> int:

@@ -211,6 +211,7 @@
     const data = unwrapPayload(rawPayload);
     const totalStats = findDict(data, "totalStats");
     const dataRegion = findDict(data, "dataRegion");
+    const rawProductEvents = findValue(data, "interactSecKill");
     const encodedMetrics = extractEncodedMetrics(data);
     const liveId = liveIdFromPayload(rawPayload, data);
     const metrics = {};
@@ -251,8 +252,13 @@
       liveId,
       timestamp: new Date().toISOString(),
       captured_api: TARGET_API,
+      payload_sections: {
+        totalStats: Boolean(totalStats) || Object.keys(encodedMetrics).some((field) => !DATA_REGION_FIELDS.has(field)),
+        dataRegion: Boolean(dataRegion) || Object.keys(encodedMetrics).some((field) => DATA_REGION_FIELDS.has(field)),
+        interactSecKill: Boolean(rawProductEvents)
+      },
       metrics,
-      events: parseProductEvents(findValue(data, "interactSecKill"))
+      events: parseProductEvents(rawProductEvents)
     };
   }
 
@@ -267,6 +273,10 @@
       liveId: current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       timestamp: current.timestamp || new Date().toISOString(),
       captured_api: TARGET_API,
+      payload_sections: {
+        ...(previous.payload_sections || {}),
+        ...(current.payload_sections || {})
+      },
       metrics: {
         ...previousMetrics,
         ...currentMetrics,
@@ -312,6 +322,7 @@
         lastError: "",
         liveId,
         metricKeys: Object.keys(merged.metrics || {}),
+        payloadSections: merged.payload_sections || {},
         eventCount: (merged.events || []).length
       }
     }, "*");

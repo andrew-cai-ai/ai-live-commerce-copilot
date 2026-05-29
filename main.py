@@ -24,6 +24,7 @@ from app.services.inventory_import import (
     smart_rows_to_inventory_text,
 )
 from app.services.live_data_connector import LiveDataConnector
+from app.services.live_memory import live_memory
 from app.services.report_history import get_report_path, list_reports, save_report
 from app.services.taobao_live_scoring import TaobaoLiveScoringService
 from scoring import parse_manual_research_overrides, score_products
@@ -257,6 +258,16 @@ async def live_history(request: Request, host_id: str = "default") -> dict[str, 
     if not is_authenticated(request):
         return {"error": "unauthorized"}
     return live_data_connector.session_history(host_id)
+
+
+@app.get("/api/live/product-playbook")
+async def live_product_playbook(request: Request, product_name: str = "", host_id: str = "default") -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    return {
+        "product": live_memory.product_profile(product_name),
+        "host": live_memory.host_profile(host_id),
+    }
 
 
 @app.post("/api/live/session-meta")
@@ -855,6 +866,7 @@ def _render_live_console() -> str:
               <div class="switch-metric"><span class="label">预计提升</span><b id="gmv-lift">--</b></div>
             </div>
             <div class="transition-line" id="transition-line">等数据稳定后再决定是否切品。</div>
+            <div class="small" id="product-playbook-line" style="margin-top:8px;">商品打法：等待当前商品。</div>
           </div>
           <div class="comment-priority">
             <span class="label">当前最值得回复</span>
@@ -1102,12 +1114,14 @@ def _render_live_console() -> str:
     }
     function nextSentence(action, nextAction) {
       const text = String(action || "").toLowerCase();
+      const fallback = String(nextAction || "");
+      if (fallback.includes("按商品打法")) return fallback;
       if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
-      if (text.includes("value")) return "别光看价格，平时通勤能穿，买回去不会吃灰。";
-      if (text.includes("sizing")) return "175/70 正常 M，里面加卫衣建议 L。";
+      if (text.includes("value")) return fallback || "别光看价格，平时通勤能穿，买回去不会吃灰。";
+      if (text.includes("sizing")) return fallback || "175/70 正常 M，里面加卫衣建议 L。";
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
-      if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
-      return nextAction || "哥几个看一下，这件现在数据还不错，先继续讲 30 秒。";
+      if (text.includes("push")) return fallback || "现在已经有人在下单了，尺码合适的先锁。";
+      return fallback || "哥几个看一下，这件现在数据还不错，先继续讲 30 秒。";
     }
     function updateVoiceButtons() {
       ["voice-toggle", "voice-toggle-sticky"].forEach((id) => {
@@ -1239,19 +1253,24 @@ def _render_live_console() -> str:
       const action = normalizeAction(data.current_action);
       const plan = directorPlan(data.current_action, data.recommended_next_product);
       const fatigue = Number((data.product_health || {}).fatigue_score || 0);
+      const playbook = data.product_playbook || {};
+      const sequence = Array.isArray(playbook.sequence) ? playbook.sequence.slice(0, 4).join(" → ") : "";
       document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
       document.getElementById("current-action").textContent = action;
       const sentence = nextSentence(data.current_action, data.next_action);
       document.getElementById("next-sentence").textContent = sentence;
       document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
       document.getElementById("director-now").textContent = plan[0];
-      document.getElementById("director-next").textContent = plan[1];
+      document.getElementById("director-next").textContent = sequence ? "打法：" + sequence : plan[1];
       document.getElementById("director-avoid").textContent = plan[2];
       document.getElementById("fatigue-score").textContent = fatigue ? String(Math.round(fatigue)) : "--";
       document.getElementById("time-left").textContent = switchSecondsLeft(fatigue);
       document.getElementById("switch-product").textContent = data.recommended_next_product || "等待商品池";
       document.getElementById("gmv-lift").textContent = gmvLiftText(data, fatigue);
       document.getElementById("transition-line").textContent = transitionSentence(data.current_action, data.recommended_next_product);
+      document.getElementById("product-playbook-line").textContent = playbook.name
+        ? "商品打法：" + playbook.name + " · " + (playbook.best_for || "") + (playbook.learned_samples ? " · 已学习 " + playbook.learned_samples + " 次" : "")
+        : "商品打法：等待当前商品。";
       document.getElementById("push-mode").classList.toggle("show", isPushMode(data));
       document.getElementById("host-id-label").textContent = data.host_id || hostId();
       document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
