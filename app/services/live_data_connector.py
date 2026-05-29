@@ -178,6 +178,7 @@ class LiveDataConnector:
             if workspace_filter and row_workspace_id != workspace_filter:
                 continue
             feedback_stats = _host_feedback_stats(session.action_history)
+            active_intervention = _active_boss_intervention(session)
             rows.append({
                 "host_id": host_id,
                 "workspace_id": row_workspace_id,
@@ -200,6 +201,9 @@ class LiveDataConnector:
                 "last_host_feedback_at": feedback_stats["last_at"],
                 "last_host_feedback_action": feedback_stats["last_action"],
                 "last_host_feedback_sentence": feedback_stats["last_sentence"],
+                "pending_boss_intervention": bool(active_intervention),
+                "boss_intervention_message": active_intervention.get("message", "") if active_intervention else "",
+                "boss_intervention_age_seconds": round(now - float(active_intervention.get("created_at") or now), 1) if active_intervention else None,
                 "current_product": latest_snapshot.current_product if latest_snapshot else "",
                 "online_uv": latest_snapshot.online_uv if latest_snapshot else 0,
                 "total_viewers": (latest_snapshot.total_live_viewers or latest_snapshot.uv) if latest_snapshot else 0,
@@ -302,6 +306,7 @@ class LiveDataConnector:
             "created_at": time.time(),
             "created_by": str(payload.get("created_by") or "boss")[:80],
             "host_id": resolved_host_id,
+            "status": "pending",
         }
         session.metadata["boss_intervention"] = intervention
         return {"ok": True, "host_id": resolved_host_id, "intervention": intervention}
@@ -309,14 +314,44 @@ class LiveDataConnector:
     def get_boss_intervention(self, host_id: str | None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         resolved_host_id = _host_id_from_payload(payload or {}, host_id)
         session = self.sessions.get(resolved_host_id)
-        intervention = dict((session.metadata.get("boss_intervention") if session else {}) or {})
+        intervention = _active_boss_intervention(session) if session else None
         if not intervention:
             return {"ok": True, "host_id": resolved_host_id, "intervention": None}
+        intervention = dict(intervention)
         age_seconds = time.time() - float(intervention.get("created_at") or 0)
-        if age_seconds > 180:
-            return {"ok": True, "host_id": resolved_host_id, "intervention": None}
         intervention["age_seconds"] = round(age_seconds, 1)
         return {"ok": True, "host_id": resolved_host_id, "intervention": intervention}
+
+    def ack_boss_intervention(self, host_id: str | None, payload: dict[str, Any]) -> dict[str, Any]:
+        resolved_host_id = _host_id_from_payload(payload, host_id)
+        session = self.sessions.get(resolved_host_id)
+        if not session:
+            return {"ok": False, "host_id": resolved_host_id, "intervention": None}
+        intervention = session.metadata.get("boss_intervention")
+        if not isinstance(intervention, dict) or not intervention:
+            return {"ok": False, "host_id": resolved_host_id, "intervention": None}
+        intervention["status"] = "acknowledged"
+        intervention["acknowledged_at"] = time.time()
+        intervention["acknowledged_by"] = str(payload.get("acknowledged_by") or "host")[:80]
+        session.metadata["boss_intervention"] = intervention
+        message = str(intervention.get("message") or "老板指令").strip()[:160]
+        entry = {
+            "timestamp": time.time(),
+            "last_seen": time.time(),
+            "decision": "主播已确认老板指令",
+            "mode": "Boss intervention ack",
+            "reason": [message],
+            "next_action": "已收到并准备执行老板提醒",
+            "confidence": 1.0,
+            "current_live_score": 0,
+            "trend_signature": (),
+            "repeat_count": 1,
+            "event_type": "boss_intervention_ack",
+        }
+        session.action_history.append(entry)
+        session.action_history = session.action_history[-20:]
+        self.action_history = session.action_history
+        return {"ok": True, "host_id": resolved_host_id, "intervention": dict(intervention)}
 
     def update_session_metadata(self, host_id: str, metadata: dict[str, Any]) -> dict[str, Any]:
         clean_host_id = _clean_host_id(host_id)
@@ -919,10 +954,27 @@ def _boss_room_card(session: dict[str, Any]) -> dict[str, Any]:
         "last_host_feedback_at": float(session.get("last_host_feedback_at") or 0),
         "last_host_feedback_action": session.get("last_host_feedback_action") or "",
         "last_host_feedback_sentence": session.get("last_host_feedback_sentence") or "",
+        "pending_boss_intervention": bool(session.get("pending_boss_intervention")),
+        "boss_intervention_message": session.get("boss_intervention_message") or "",
+        "boss_intervention_age_seconds": session.get("boss_intervention_age_seconds"),
         "execution_score": score,
         "age_seconds": session.get("age_seconds"),
         "extension_update_available": bool(session.get("extension_update_available")),
     }
+
+
+def _active_boss_intervention(session: LiveSessionState | None) -> dict[str, Any] | None:
+    if not session:
+        return None
+    intervention = session.metadata.get("boss_intervention")
+    if not isinstance(intervention, dict) or not intervention:
+        return None
+    if intervention.get("status") == "acknowledged" or intervention.get("acknowledged_at"):
+        return None
+    created_at = float(intervention.get("created_at") or 0)
+    if not created_at or time.time() - created_at > 180:
+        return None
+    return dict(intervention)
 
 
 def _boss_risk_card(session: dict[str, Any]) -> dict[str, Any]:

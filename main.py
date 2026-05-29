@@ -310,6 +310,20 @@ async def get_live_boss_intervention(request: Request, host_id: str = "default",
     return live_data_connector.get_boss_intervention(host_id, payload)
 
 
+@app.post("/api/live/boss-intervention/ack")
+async def ack_live_boss_intervention(request: Request) -> dict[str, Any]:
+    if not is_authenticated(request):
+        return {"error": "unauthorized"}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    host_id = body.get("host_id") or body.get("hostId")
+    return live_data_connector.ack_boss_intervention(str(host_id or ""), body)
+
+
 @app.post("/live-metrics")
 async def live_metrics(request: Request) -> dict[str, Any]:
     try:
@@ -756,7 +770,8 @@ def _render_live_console() -> str:
     .toast { color: var(--accent); font-weight: 900; min-height: 20px; }
     .sticky-action { position: sticky; bottom: 12px; z-index: 4; margin-top: 14px; border: 1px solid rgba(12, 107, 88, .24); box-shadow: 0 14px 40px rgba(22, 33, 31, .14); }
     .boss-alert { display: none; border: 2px solid var(--danger); background: #fff1f2; color: var(--danger); border-radius: 10px; padding: 14px; margin-bottom: 14px; font-size: 22px; font-weight: 950; }
-    .boss-alert.show { display: block; }
+    .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .boss-alert button { background: var(--danger); color: #fff; white-space: nowrap; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .action { font-size: 42px; } .sentence { font-size: 28px; } }
   </style>
 </head>
@@ -769,7 +784,10 @@ def _render_live_console() -> str:
         <span class="status" id="connection-status">等待插件数据...</span><a href="/live/prompter" style="margin-left:12px;">大字提词器</a><a href="/" style="margin-left:12px;">返回选品</a>
       </div>
     </header>
-    <section class="boss-alert" id="boss-alert">等待老板指令</section>
+    <section class="boss-alert" id="boss-alert">
+      <div id="boss-alert-message">等待老板指令</div>
+      <button id="boss-alert-ack" type="button">收到，马上做</button>
+    </section>
     <section class="layout">
       <div>
         <section class="panel hero">
@@ -1143,14 +1161,30 @@ def _render_live_console() -> str:
       if (!response) return;
       const data = await response.json().catch(() => ({}));
       const alert = document.getElementById("boss-alert");
+      const messageNode = document.getElementById("boss-alert-message");
       const intervention = data.intervention;
       if (!alert) return;
       if (!intervention || !intervention.message) {
         alert.classList.remove("show");
+        window.__bossInterventionMessage = "";
         return;
       }
-      alert.textContent = "老板提醒：" + intervention.message;
+      window.__bossInterventionMessage = intervention.message;
+      if (messageNode) messageNode.textContent = "老板提醒：" + intervention.message;
       alert.classList.add("show");
+    }
+    async function ackBossIntervention() {
+      const message = window.__bossInterventionMessage || "";
+      if (!message) return;
+      await fetch("/api/live/boss-intervention/ack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host_id: hostId(), workspace_id: workspaceId, message, acknowledged_by: "host_console" })
+      }).catch(() => {});
+      window.__bossInterventionMessage = "";
+      const alert = document.getElementById("boss-alert");
+      if (alert) alert.classList.remove("show");
+      toast("已确认老板指令");
     }
     function setCheck(id, done) {
       const node = document.getElementById(id);
@@ -1172,6 +1206,7 @@ def _render_live_console() -> str:
     document.getElementById("copy-sentence-sticky").addEventListener("click", copyNextSentence);
     document.getElementById("mark-executed").addEventListener("click", markExecuted);
     document.getElementById("mark-executed-sticky").addEventListener("click", markExecuted);
+    document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
       if (target === "input" || target === "textarea") return;
@@ -1240,7 +1275,8 @@ def _render_live_prompter() -> str:
     .prompter-actions .ghost { background: #14201d; color: var(--accent); }
     .toast { color: var(--accent); font-weight: 950; min-height: 22px; font-size: 18px; }
     .boss-alert { display: none; border: 2px solid var(--danger); background: rgba(251, 113, 133, .14); color: #fecdd3; border-radius: 14px; padding: 18px; margin-bottom: 16px; font-size: clamp(28px, 4vw, 56px); font-weight: 1000; line-height: 1.08; }
-    .boss-alert.show { display: block; }
+    .boss-alert.show { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
+    .boss-alert button { background: #fecdd3; color: #5f0f1d; border: 0; white-space: nowrap; font-size: 18px; font-weight: 950; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1258,7 +1294,10 @@ def _render_live_prompter() -> str:
         <a href="/boss">老板看板</a>
       </div>
     </header>
-    <section class="boss-alert" id="boss-alert">等待老板指令</section>
+    <section class="boss-alert" id="boss-alert">
+      <div id="boss-alert-message">等待老板指令</div>
+      <button id="boss-alert-ack" type="button">收到，马上做</button>
+    </section>
     <section class="stage">
       <section class="main-card">
         <span class="label">Current action</span>
@@ -1495,18 +1534,35 @@ def _render_live_prompter() -> str:
       if (!response) return;
       const data = await response.json().catch(() => ({}));
       const alert = document.getElementById("boss-alert");
+      const messageNode = document.getElementById("boss-alert-message");
       const intervention = data.intervention;
       if (!alert) return;
       if (!intervention || !intervention.message) {
         alert.classList.remove("show");
+        window.__bossInterventionMessage = "";
         return;
       }
-      alert.textContent = "老板提醒：" + intervention.message;
+      window.__bossInterventionMessage = intervention.message;
+      if (messageNode) messageNode.textContent = "老板提醒：" + intervention.message;
       alert.classList.add("show");
+    }
+    async function ackBossIntervention() {
+      const message = window.__bossInterventionMessage || "";
+      if (!message) return;
+      await fetch("/api/live/boss-intervention/ack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ host_id: hostId(), workspace_id: workspaceId, message, acknowledged_by: "host_prompter" })
+      }).catch(() => {});
+      window.__bossInterventionMessage = "";
+      const alert = document.getElementById("boss-alert");
+      if (alert) alert.classList.remove("show");
+      toast("已确认老板指令");
     }
     document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
     document.getElementById("copy-sentence").addEventListener("click", copyNextSentence);
     document.getElementById("mark-executed").addEventListener("click", markExecuted);
+    document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
       if (target === "input" || target === "textarea") return;
@@ -1902,12 +1958,13 @@ def _render_boss_dashboard() -> str:
       node.innerHTML = rooms.map((room) => {
         const url = "/admin/live/" + encodeURIComponent(room.host_id);
         const feedback = fmtNumber(room.host_feedback_count_5m) + '次 / 5m' + (room.last_host_feedback_action ? '<div class="small">' + escapeHtml(room.last_host_feedback_action) + '</div>' : '');
+        const pending = room.pending_boss_intervention ? '<div class="small" style="color:#9f2f22;font-weight:950;">待主播确认：' + escapeHtml(room.boss_intervention_message || "") + '</div>' : '<div class="small">老板指令：已同步</div>';
         const buttons = '<div class="intervention-buttons">'
           + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="开始讲尺码，直接回答身高体重。">讲尺码</button>'
           + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="解释价格价值，别急着换款。">讲价格</button>'
           + '<button data-host-id="' + escapeHtml(room.host_id) + '" data-workspace-id="' + escapeHtml(room.workspace_id || "") + '" data-message="当前款收口，准备切下一件。">切品</button>'
           + '</div>';
-        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a>' + buttons + '</td></tr>';
+        return '<tr><td>' + escapeHtml(room.display_name) + '<div class="small">' + escapeHtml(room.workspace_id || "default") + '</div></td><td class="score">' + fmtNumber(room.execution_score) + '</td><td>' + feedback + pending + '</td><td>' + fmtMoney(room.pay_amt) + '</td><td>' + fmtNumber(room.online_uv) + '</td><td>' + fmtPercent(room.ctr) + '</td><td>' + fmtPercent(room.cvr) + '</td><td>' + escapeHtml(room.current_action || "--") + '</td><td><a class="button" href="' + url + '">详情</a>' + buttons + '</td></tr>';
       }).join("");
       node.querySelectorAll(".intervention-buttons button").forEach((button) => {
         button.addEventListener("click", () => sendIntervention(button.dataset.hostId, button.dataset.workspaceId, button.dataset.message));
