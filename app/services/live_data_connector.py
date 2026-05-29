@@ -287,6 +287,7 @@ class LiveDataConnector:
         sentence = str(payload.get("sentence") or "").strip()[:240]
         product = str(payload.get("current_product") or payload.get("product") or "").strip()[:160]
         before_snapshot = session.snapshots[-1] if session.snapshots else None
+        product_context = _product_context_for_feedback(session, product, before_snapshot)
         entry = {
             "timestamp": time.time(),
             "last_seen": time.time(),
@@ -301,6 +302,8 @@ class LiveDataConnector:
             "event_type": "host_feedback",
             "action_label": action,
             "product": product,
+            "product_position": product_context.get("product_position"),
+            "product_elapsed_seconds": product_context.get("product_elapsed_seconds"),
             "effect_status": "pending" if before_snapshot else "waiting_for_metrics",
             "effect_window_seconds": 30,
             "before_metrics": _effect_metrics(before_snapshot),
@@ -1118,6 +1121,32 @@ def _effect_metrics(snapshot: LiveMetricSnapshot | None) -> dict[str, float]:
     }
 
 
+def _product_context_for_feedback(
+    session: LiveSessionState,
+    product_name: str,
+    before_snapshot: LiveMetricSnapshot | None,
+) -> dict[str, Any]:
+    target = product_name or (before_snapshot.current_product if before_snapshot else "")
+    if not target:
+        return {"product_position": None, "product_elapsed_seconds": None}
+    seen_order: list[str] = []
+    first_seen_at = 0.0
+    for snapshot in session.snapshots:
+        name = snapshot.current_product or ""
+        if name and name not in seen_order:
+            seen_order.append(name)
+        if name == target and not first_seen_at:
+            first_seen_at = snapshot.timestamp
+    position = seen_order.index(target) + 1 if target in seen_order else None
+    elapsed = None
+    if before_snapshot and first_seen_at:
+        elapsed = max(0, round(before_snapshot.timestamp - first_seen_at))
+    return {
+        "product_position": position,
+        "product_elapsed_seconds": elapsed,
+    }
+
+
 def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapshot) -> None:
     after = _effect_metrics(snapshot)
     if not after:
@@ -1156,6 +1185,11 @@ def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapsh
             action=str(action.get("action_label") or action.get("reason", ["已执行 AI 建议"])[0]),
             delta=delta,
             result=str(action["effect_result"]),
+            context={
+                "after_cvr": after.get("cvr"),
+                "product_position": action.get("product_position"),
+                "product_elapsed_seconds": action.get("product_elapsed_seconds"),
+            },
         )
 
 

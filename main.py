@@ -1269,7 +1269,7 @@ def _render_live_console() -> str:
       document.getElementById("gmv-lift").textContent = gmvLiftText(data, fatigue);
       document.getElementById("transition-line").textContent = transitionSentence(data.current_action, data.recommended_next_product);
       document.getElementById("product-playbook-line").textContent = playbook.name
-        ? "商品打法：" + playbook.name + " · " + (playbook.best_for || "") + (playbook.learned_samples ? " · 已学习 " + playbook.learned_samples + " 次" : "")
+        ? "商品打法：" + playbook.name + " · 顺序 " + (sequence || "--") + " · 最佳位置 " + (playbook.best_position || "--") + " · 平均CVR " + fmtPercent(playbook.avg_cvr || 0) + (playbook.best_duration_seconds ? " · 建议讲 " + Math.round(playbook.best_duration_seconds) + "秒" : "") + (playbook.learned_samples ? " · 已学习 " + playbook.learned_samples + " 次" : "")
         : "商品打法：等待当前商品。";
       document.getElementById("push-mode").classList.toggle("show", isPushMode(data));
       document.getElementById("host-id-label").textContent = data.host_id || hostId();

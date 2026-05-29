@@ -99,12 +99,17 @@ class LiveMemoryService:
         product_key = _product_key(name)
         learned = self.memory.get("products", {}).get(product_key, {})
         best_actions = _rank_action_stats(learned.get("actions", {}))
+        best_position = _best_position(learned.get("positions", {}))
+        lifecycle = _lifecycle_summary(learned.get("monthly", {}))
         return {
             **base,
             "product_name": name or "当前商品",
             "learned_samples": int(learned.get("samples") or 0),
-            "best_position": learned.get("best_position") or base.get("best_position") or "--",
+            "avg_cvr": _safe_average(learned.get("cvr_total"), learned.get("cvr_count")),
+            "best_duration_seconds": round(_safe_average(learned.get("duration_total"), learned.get("duration_count")) or 0),
+            "best_position": best_position or learned.get("best_position") or base.get("best_position") or "--",
             "best_actions": best_actions[:5],
+            "lifecycle": lifecycle,
             "confidence": min(0.95, 0.55 + min(int(learned.get("samples") or 0), 20) * 0.02),
         }
 
@@ -115,7 +120,9 @@ class LiveMemoryService:
         action: str,
         delta: dict[str, Any],
         result: str,
+        context: dict[str, Any] | None = None,
     ) -> None:
+        context = context or {}
         product_key = _product_key(product_name)
         host_key = _host_key(host_id)
         action_key = _action_key(action)
@@ -131,6 +138,8 @@ class LiveMemoryService:
             "samples": 0,
             "actions": {},
         })
+        product["display_name"] = product_name or product.get("display_name") or "当前商品"
+        _update_product_rollups(product, context, score, now)
         for bucket in (product, host):
             bucket["samples"] = int(bucket.get("samples") or 0) + 1
             bucket["last_seen_at"] = now
@@ -158,6 +167,7 @@ class LiveMemoryService:
             "host_id": host_id or "default",
             "samples": int(host.get("samples") or 0),
             "best_actions": _rank_action_stats(host.get("actions", {}))[:5],
+            "weak_actions": _rank_action_stats(host.get("actions", {}), reverse=False)[:5],
         }
 
     def product_profile(self, product_name: str) -> dict[str, Any]:
@@ -212,7 +222,34 @@ def _default_playbook(product_name: str) -> dict[str, Any]:
     return {key: value for key, value in best.items() if key != "match"}
 
 
-def _rank_action_stats(actions: dict[str, Any]) -> list[dict[str, Any]]:
+def _update_product_rollups(product: dict[str, Any], context: dict[str, Any], score: float, timestamp: float) -> None:
+    cvr = _to_float(context.get("after_cvr"))
+    if cvr > 0:
+        product["cvr_total"] = float(product.get("cvr_total") or 0) + cvr
+        product["cvr_count"] = int(product.get("cvr_count") or 0) + 1
+    duration = _to_float(context.get("product_elapsed_seconds"))
+    if duration <= 0 and score > 0:
+        duration = 90
+    if duration > 0:
+        product["duration_total"] = float(product.get("duration_total") or 0) + duration
+        product["duration_count"] = int(product.get("duration_count") or 0) + 1
+    position = int(_to_float(context.get("product_position")) or 0)
+    if position > 0:
+        positions = product.setdefault("positions", {})
+        key = str(position)
+        item = positions.setdefault(key, {"count": 0, "score_total": 0.0, "cvr_total": 0.0})
+        item["count"] = int(item.get("count") or 0) + 1
+        item["score_total"] = float(item.get("score_total") or 0) + score
+        item["cvr_total"] = float(item.get("cvr_total") or 0) + cvr
+    month = time.strftime("%Y-%m", time.localtime(timestamp))
+    monthly = product.setdefault("monthly", {})
+    month_stats = monthly.setdefault(month, {"count": 0, "score_total": 0.0, "cvr_total": 0.0})
+    month_stats["count"] = int(month_stats.get("count") or 0) + 1
+    month_stats["score_total"] = float(month_stats.get("score_total") or 0) + score
+    month_stats["cvr_total"] = float(month_stats.get("cvr_total") or 0) + cvr
+
+
+def _rank_action_stats(actions: dict[str, Any], reverse: bool = True) -> list[dict[str, Any]]:
     rows = []
     for stats in actions.values():
         count = max(int(stats.get("count") or 0), 1)
@@ -225,7 +262,61 @@ def _rank_action_stats(actions: dict[str, Any]) -> list[dict[str, Any]]:
             "avg_cvr_delta": float(stats.get("cvr_delta") or 0) / count,
             "avg_ctr_delta": float(stats.get("ctr_delta") or 0) / count,
         })
-    return sorted(rows, key=lambda item: (item["avg_score"], item["effective_rate"]), reverse=True)
+    return sorted(rows, key=lambda item: (item["avg_score"], item["effective_rate"]), reverse=reverse)
+
+
+def _best_position(positions: dict[str, Any]) -> str:
+    best_key = ""
+    best_score = None
+    for key, stats in positions.items():
+        count = max(int(stats.get("count") or 0), 1)
+        score = float(stats.get("score_total") or 0) / count
+        if best_score is None or score > best_score:
+            best_key = key
+            best_score = score
+    if not best_key:
+        return ""
+    return f"第{best_key}件"
+
+
+def _lifecycle_summary(monthly: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for month, stats in monthly.items():
+        count = max(int(stats.get("count") or 0), 1)
+        rows.append({
+            "month": month,
+            "samples": count,
+            "avg_score": float(stats.get("score_total") or 0) / count,
+            "avg_cvr": float(stats.get("cvr_total") or 0) / count,
+        })
+    rows = sorted(rows, key=lambda item: item["month"])
+    if not rows:
+        return {"status": "waiting", "best_month": "--", "trend": "--", "months": []}
+    best = max(rows, key=lambda item: item["avg_score"])
+    trend = "--"
+    if len(rows) >= 2:
+        diff = rows[-1]["avg_score"] - rows[-2]["avg_score"]
+        trend = "up" if diff > 0.5 else "down" if diff < -0.5 else "stable"
+    return {
+        "status": "ready",
+        "best_month": best["month"],
+        "trend": trend,
+        "months": rows[-6:],
+    }
+
+
+def _safe_average(total: Any, count: Any) -> float:
+    denominator = int(_to_float(count) or 0)
+    if denominator <= 0:
+        return 0.0
+    return float(_to_float(total) or 0) / denominator
+
+
+def _to_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _memory_score(delta: dict[str, Any]) -> float:
