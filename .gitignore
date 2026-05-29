@@ -14,3 +14,4 @@ data/live_director_training.jsonl
 data/live_knowledge_graph.json
 data/director_model_v0.json
 outputs/
+scripts/split_live_connector.py
