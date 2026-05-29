@@ -10,6 +10,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 from app.services.live_memory import director_brief, live_memory
+from app.services.live_training_data import live_training_data
 
 load_dotenv()
 
@@ -1147,6 +1148,28 @@ def _product_context_for_feedback(
     }
 
 
+def _nearest_ai_decision(session: LiveSessionState, timestamp: float) -> dict[str, Any]:
+    candidates = [
+        action for action in session.action_history
+        if action.get("event_type") not in {"host_feedback", "boss_intervention_ack"}
+    ]
+    if not candidates:
+        return {}
+    if timestamp <= 0:
+        selected = candidates[-1]
+    else:
+        selected = min(candidates, key=lambda item: abs(float(item.get("timestamp") or 0) - timestamp))
+    return {
+        "timestamp": selected.get("timestamp"),
+        "decision": selected.get("decision"),
+        "mode": selected.get("mode"),
+        "reason": selected.get("reason") or [],
+        "next_action": selected.get("next_action"),
+        "confidence": selected.get("confidence"),
+        "current_live_score": selected.get("current_live_score"),
+    }
+
+
 def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapshot) -> None:
     after = _effect_metrics(snapshot)
     if not after:
@@ -1189,6 +1212,22 @@ def _update_action_effects(session: LiveSessionState, snapshot: LiveMetricSnapsh
                 "after_cvr": after.get("cvr"),
                 "product_position": action.get("product_position"),
                 "product_elapsed_seconds": action.get("product_elapsed_seconds"),
+            },
+        )
+        live_training_data.record_sample(
+            host_id=snapshot.host_id,
+            product_name=str(action.get("product") or snapshot.current_product or ""),
+            ai_decision=_nearest_ai_decision(session, float(action.get("timestamp") or 0)),
+            host_action=action,
+            before_metrics=before,
+            after_metrics=after,
+            delta=delta,
+            result=str(action["effect_result"]),
+            context={
+                "product_position": action.get("product_position"),
+                "product_elapsed_seconds": action.get("product_elapsed_seconds"),
+                "comments": snapshot.comment_text,
+                "traffic_source": snapshot.source,
             },
         )
 

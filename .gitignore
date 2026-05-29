@@ -9,4 +9,6 @@ __pycache__/
 data/reports/
 data/fx_rate_cache.json
 data/live_memory.json
+data/live_director_training.jsonl
+data/live_knowledge_graph.json
 outputs/

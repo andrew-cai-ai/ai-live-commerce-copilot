@@ -5,6 +5,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from app.services.live_training_data import infer_product_dna
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -104,6 +105,7 @@ class LiveMemoryService:
         return {
             **base,
             "product_name": name or "当前商品",
+            "product_dna": infer_product_dna(name),
             "learned_samples": int(learned.get("samples") or 0),
             "avg_cvr": _safe_average(learned.get("cvr_total"), learned.get("cvr_count")),
             "best_duration_seconds": round(_safe_average(learned.get("duration_total"), learned.get("duration_count")) or 0),
