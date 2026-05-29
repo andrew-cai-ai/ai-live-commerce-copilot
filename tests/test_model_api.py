@@ -1,0 +1,56 @@
+import unittest
+
+from fastapi.testclient import TestClient
+
+from main import app
+
+
+class ModelApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+
+    def test_model_readiness_apis_return_json(self) -> None:
+        routes = [
+            "/api/model/training-dashboard",
+            "/api/model/coverage?product_threshold=3&host_threshold=3",
+            "/api/model/cold-start?product_name=Kragg%20Shirt&top_k=2",
+            "/api/model/offline-evaluation?min_quality=70",
+        ]
+        for route in routes:
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+                self.assertIsInstance(response.json(), dict)
+
+    def test_train_v0_api_handles_body(self) -> None:
+        response = self.client.post("/api/model/train-v0", json={"min_quality": 70})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn(payload["status"], {"trained", "not_enough_data"})
+
+    def test_live_ingest_endpoint_accepts_extension_payload(self) -> None:
+        response = self.client.post("/api/live-ingest", json={
+            "source": "chrome_extension",
+            "host_id": "api-test",
+            "liveId": "live-api-test",
+            "metrics": {
+                "online_uv": 15,
+                "uv": 13439,
+                "pv": 21213,
+                "heat_score": 571,
+                "pay_amt": 41230,
+                "pay_byr_rate": 0.0201,
+                "ipv_uv_rate": 0.1552,
+                "stay_time_pu": 66,
+            },
+            "events": [{"title": "Kragg Shirt", "payBuyerCnt": 3}],
+        })
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["source"], "chrome_extension")
+        self.assertEqual(payload["host_id"], "api-test")
+
+
+if __name__ == "__main__":
+    unittest.main()

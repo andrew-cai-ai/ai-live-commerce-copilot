@@ -14,7 +14,7 @@ from app.services.live_training_data import live_training_data
 
 load_dotenv()
 
-LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.2")
+LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.3")
 
 
 @dataclass
