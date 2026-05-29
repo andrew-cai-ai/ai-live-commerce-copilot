@@ -46,6 +46,8 @@ class LiveTrainingDataService:
         context = context or {}
         action_code = classify_action(host_action.get("action_label") or host_action.get("decision") or "")
         product_dna = infer_product_dna(product_name, context)
+        quality = score_sample_quality(product_name, action_code, ai_decision, host_action, before_metrics, after_metrics, delta, context)
+        reward = director_reward(delta, quality["score"])
         sample = {
             "schema_version": "director_training_v1",
             "timestamp": time.time(),
@@ -64,7 +66,11 @@ class LiveTrainingDataService:
             "before_metrics": before_metrics,
             "after_metrics": after_metrics,
             "result_delta": delta,
+            "reward": reward,
             "result": result,
+            "sample_quality_score": quality["score"],
+            "sample_quality_reasons": quality["reasons"],
+            "use_for_training": quality["score"] >= 70,
             "traffic_source": context.get("traffic_source") or "unknown",
             "comment_topics": extract_comment_topics(context.get("comments") or ""),
         }
@@ -81,13 +87,54 @@ class LiveTrainingDataService:
             rows.append({
                 "code": code,
                 "name": meta["name"],
+                "elo": round(float(stats.get("elo") or 1500)),
                 "samples": int(stats.get("count") or 0),
+                "training_samples": int(stats.get("training_count") or 0),
                 "avg_ctr_delta": float(stats.get("ctr_delta") or 0) / count,
                 "avg_cvr_delta": float(stats.get("cvr_delta") or 0) / count,
                 "avg_gmv_delta": float(stats.get("gmv_delta") or 0) / count,
                 "effective_rate": float(stats.get("effective_count") or 0) / count,
             })
         return {"actions": rows}
+
+    def director_replay(self, host_id: str | None = None, limit: int = 80) -> list[dict[str, Any]]:
+        rows = self._read_recent_samples(limit=limit * 3)
+        if host_id:
+            rows = [row for row in rows if row.get("host_id") == host_id]
+        return [_replay_event(row) for row in rows[-limit:]]
+
+    def best_practices(self, product_name: str | None = None) -> dict[str, Any]:
+        products = self.graph.get("products", {})
+        if product_name:
+            product = products.get(_key(product_name), {})
+            return {"product_name": product_name, "best_practices": _best_practice_from_product(product)}
+        return {
+            "products": [
+                {
+                    "product_name": product.get("name") or key,
+                    "best_practices": _best_practice_from_product(product),
+                }
+                for key, product in products.items()
+            ]
+        }
+
+    def training_dataset_v1(self, min_quality: int = 70, limit: int = 5000) -> list[dict[str, Any]]:
+        rows = self._read_recent_samples(limit=limit)
+        return [
+            {
+                "state": _training_state(row),
+                "action": row.get("action_code"),
+                "reward": row.get("reward"),
+                "quality": row.get("sample_quality_score"),
+                "metadata": {
+                    "host_id": row.get("host_id"),
+                    "product_name": row.get("product_name"),
+                    "timestamp": row.get("timestamp"),
+                },
+            }
+            for row in rows
+            if int(row.get("sample_quality_score") or 0) >= min_quality and row.get("use_for_training")
+        ]
 
     def _append_jsonl(self, sample: dict[str, Any]) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -123,6 +170,7 @@ class LiveTrainingDataService:
         _rollup_relation(product.setdefault("hosts", {}), host_key, sample["host_id"], score, cvr)
         _rollup_relation(host.setdefault("products", {}), product_key, sample["product_name"], score, cvr)
         _rollup_action(graph.setdefault("actions", {}), action_code, sample["action_name"], sample, score, cvr)
+        _update_action_elo(action, sample)
 
         for topic in sample.get("comment_topics") or []:
             topics = product.setdefault("comment_topics", {})
@@ -147,6 +195,20 @@ class LiveTrainingDataService:
     def _save_graph(self) -> None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.graph_path.write_text(json.dumps(self.graph, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _read_recent_samples(self, limit: int = 500) -> list[dict[str, Any]]:
+        if not self.training_path.exists():
+            return []
+        lines = self.training_path.read_text(encoding="utf-8").splitlines()
+        rows = []
+        for line in lines[-limit:]:
+            try:
+                item = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+        return rows
 
 
 def classify_action(action_text: str) -> str:
@@ -219,10 +281,138 @@ def extract_comment_topics(comments: str) -> list[str]:
     return topics
 
 
+def score_sample_quality(
+    product_name: str,
+    action_code: str,
+    ai_decision: dict[str, Any],
+    host_action: dict[str, Any],
+    before_metrics: dict[str, Any],
+    after_metrics: dict[str, Any],
+    delta: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    score = 100
+    reasons: list[str] = []
+    before_time = _to_float(before_metrics.get("timestamp"))
+    after_time = _to_float(after_metrics.get("timestamp"))
+    window = after_time - before_time if before_time and after_time else 0
+    if not before_metrics or not after_metrics:
+        score -= 35
+        reasons.append("missing_before_or_after_metrics")
+    if window and (window < 10 or window > 180):
+        score -= 15
+        reasons.append("effect_window_out_of_range")
+    if not product_name or product_name == "当前商品":
+        score -= 12
+        reasons.append("missing_product_name")
+    action_text = str(host_action.get("action_label") or host_action.get("decision") or "")
+    ai_text = " ".join(str(item) for item in [
+        ai_decision.get("decision"),
+        ai_decision.get("next_action"),
+        " ".join(str(reason) for reason in (ai_decision.get("reason") or [])),
+    ])
+    if ai_text and classify_action(ai_text) != action_code:
+        score -= 20
+        reasons.append("host_action_differs_from_ai_recommendation")
+    if _to_float(context.get("product_elapsed_seconds")) <= 0:
+        score -= 8
+        reasons.append("missing_product_elapsed_time")
+    if abs(_to_float(delta.get("gmv"))) < 1 and abs(_to_float(delta.get("cvr"))) < 0.0001 and abs(_to_float(delta.get("ctr"))) < 0.0001:
+        score -= 18
+        reasons.append("no_measurable_metric_change")
+    if context.get("product_switched_during_window"):
+        score -= 30
+        reasons.append("product_switched_during_effect_window")
+    return {"score": max(0, min(100, round(score))), "reasons": reasons or ["clean_sample"]}
+
+
+def director_reward(delta: dict[str, Any], quality_score: int) -> float:
+    reward = _sample_score(delta)
+    return round(reward * max(0.1, quality_score / 100), 4)
+
+
+def _update_action_elo(action: dict[str, Any], sample: dict[str, Any]) -> None:
+    elo = float(action.get("elo") or 1500)
+    reward = _to_float(sample.get("reward"))
+    quality = _to_float(sample.get("sample_quality_score"))
+    expected = 1 / (1 + 10 ** ((1500 - elo) / 400))
+    actual = 1.0 if reward > 1 else 0.5 if reward >= -1 else 0.0
+    k = 24 * max(0.25, quality / 100)
+    action["elo"] = round(elo + k * (actual - expected), 2)
+
+
+def _replay_event(sample: dict[str, Any]) -> dict[str, Any]:
+    delta = sample.get("result_delta") or {}
+    ai = sample.get("ai_decision") or {}
+    host = sample.get("host_execution") or {}
+    return {
+        "timestamp": sample.get("timestamp"),
+        "product_name": sample.get("product_name"),
+        "ai_action": ai.get("decision") or ai.get("next_action") or "--",
+        "host_action": host.get("action") or "--",
+        "action_code": sample.get("action_code"),
+        "result": sample.get("result"),
+        "quality": sample.get("sample_quality_score"),
+        "use_for_training": sample.get("use_for_training"),
+        "delta_summary": {
+            "ctr": _to_float(delta.get("ctr")),
+            "cvr": _to_float(delta.get("cvr")),
+            "gmv": _to_float(delta.get("gmv")),
+            "heat": _to_float(delta.get("heat")),
+        },
+    }
+
+
+def _best_practice_from_product(product: dict[str, Any]) -> dict[str, Any]:
+    actions = product.get("actions") or {}
+    ranked = sorted(
+        [
+            {
+                "code": code,
+                "name": stats.get("name") or ACTION_LIBRARY.get(code, {}).get("name") or code,
+                "count": int(stats.get("count") or 0),
+                "avg_score": _to_float(stats.get("score_total")) / max(int(stats.get("count") or 0), 1),
+                "avg_cvr_delta": _to_float(stats.get("cvr_delta")) / max(int(stats.get("count") or 0), 1),
+                "avg_gmv_delta": _to_float(stats.get("gmv_delta")) / max(int(stats.get("count") or 0), 1),
+            }
+            for code, stats in actions.items()
+        ],
+        key=lambda item: item["avg_score"],
+        reverse=True,
+    )
+    return {
+        "recommended_sequence": [item["name"] for item in ranked[:3]],
+        "top_actions": ranked[:5],
+        "sample_count": int(product.get("samples") or 0),
+        "category": product.get("category") or "--",
+        "comment_topics": sorted((product.get("comment_topics") or {}).items(), key=lambda item: item[1], reverse=True)[:5],
+    }
+
+
+def _training_state(sample: dict[str, Any]) -> dict[str, Any]:
+    before = sample.get("before_metrics") or {}
+    dna = sample.get("product_dna") or {}
+    return {
+        "heat": before.get("heat"),
+        "ctr": before.get("ctr"),
+        "cvr": before.get("cvr"),
+        "gmv": before.get("gmv"),
+        "comments": before.get("comments"),
+        "online_uv": before.get("online_uv"),
+        "product_category": dna.get("category"),
+        "product_tags": dna.get("tags") or [],
+        "season": dna.get("season"),
+        "price_band": dna.get("price_band"),
+        "comment_topics": sample.get("comment_topics") or [],
+        "host_id": sample.get("host_id"),
+    }
+
+
 def _rollup_action(bucket: dict[str, Any], code: str, name: str, sample: dict[str, Any], score: float, cvr: float) -> None:
-    item = bucket.setdefault(code, {"name": name, "count": 0, "score_total": 0.0, "effective_count": 0, "ctr_delta": 0.0, "cvr_delta": 0.0, "gmv_delta": 0.0, "cvr_total": 0.0})
+    item = bucket.setdefault(code, {"name": name, "count": 0, "training_count": 0, "score_total": 0.0, "effective_count": 0, "ctr_delta": 0.0, "cvr_delta": 0.0, "gmv_delta": 0.0, "cvr_total": 0.0, "elo": 1500})
     delta = sample.get("result_delta") or {}
     item["count"] = int(item.get("count") or 0) + 1
+    item["training_count"] = int(item.get("training_count") or 0) + (1 if sample.get("use_for_training") else 0)
     item["score_total"] = float(item.get("score_total") or 0) + score
     item["effective_count"] = int(item.get("effective_count") or 0) + (1 if sample.get("result") == "有效" else 0)
     item["ctr_delta"] = float(item.get("ctr_delta") or 0) + _to_float(delta.get("ctr"))
