@@ -8,8 +8,11 @@ from app.services.live_data_connector import (
     LATEST_EXTENSION_VERSION,
     LiveDataConnector,
     LiveMetricSnapshot,
+    LiveSessionState,
+    _director_model_state,
     _effect_metrics,
     _extract_taobao_encoded_metrics,
+    _nearest_ai_decision,
     _normalize_ingested_payload,
     _parse_encoded_metric_row,
     _product_switched_during_window,
@@ -215,6 +218,123 @@ class LiveDataConnectorTests(unittest.TestCase):
                 self.assertIn("model_v0 action", decision.reason[0])
             finally:
                 live_training_data.model_path = old_model_path
+
+    def test_rules_take_priority_over_model_v0(self) -> None:
+        old_model_path = live_training_data.model_path
+        with tempfile.TemporaryDirectory() as dirname:
+            try:
+                live_training_data.model_path = Path(dirname) / "director_model_v0.json"
+                live_training_data.model_path.write_text(json.dumps({
+                    "schema_version": "director_model_v0",
+                    "accuracy": 0.9,
+                    "training_samples": 20,
+                    "model": {
+                        "actions": ["A004", "A007"],
+                        "action_counts": {"A004": 20, "A007": 1},
+                        "feature_counts": {},
+                    },
+                }), encoding="utf-8")
+                connector = LiveDataConnector()
+                decision = connector.ingest_live_metrics({
+                    "source": "chrome_extension",
+                    "host_id": "host-rule-priority",
+                    "liveId": "live-rule-priority",
+                    "metrics": {
+                        "online_uv": 30,
+                        "uv": 300,
+                        "pv": 600,
+                        "heat_score": 300,
+                        "pay_amt": 1000,
+                        "pay_byr_rate": 0.02,
+                        "ipv_uv_rate": 0.08,
+                        "comment_uv": 12,
+                        "sizing_comments": 2,
+                        "comment_text": "175 70kg穿啥",
+                    },
+                })
+                self.assertEqual(decision.action_code, "A001")
+                self.assertEqual(decision.current_action, "switch to sizing explanation")
+            finally:
+                live_training_data.model_path = old_model_path
+
+    def test_nearest_ai_decision_includes_action_code(self) -> None:
+        session = LiveSessionState()
+        session.action_history.append({
+            "timestamp": 100.0,
+            "action_code": "A005",
+            "decision": "push harder",
+            "mode": "Live",
+            "reason": ["heat up"],
+            "next_action": "加速逼单",
+            "confidence": 0.9,
+            "current_live_score": 80,
+            "event_type": "director_decision",
+        })
+        ai_decision = _nearest_ai_decision(session, 100.0)
+        self.assertEqual(ai_decision["action_code"], "A005")
+        self.assertEqual(ai_decision["decision"], "push harder")
+
+    def test_director_model_state_uses_product_metrics_only(self) -> None:
+        snapshot = LiveMetricSnapshot(
+            timestamp=1.0,
+            host_id="host-model-state",
+            ipv_uv_rate=0.12,
+            pay_byr_rate=0.02,
+            pay_amt=1000,
+            heat_score=400,
+            online_uv=50,
+            comment_uv=8,
+            current_product="Kragg Shirt",
+        )
+        state = _director_model_state(snapshot, {})
+        self.assertEqual(state["ctr"], 0)
+        self.assertEqual(state["cvr"], 0)
+        self.assertEqual(state["gmv"], 0)
+
+    def test_model_missing_syncs_a007_directive(self) -> None:
+        old_model_path = live_training_data.model_path
+        with tempfile.TemporaryDirectory() as dirname:
+            try:
+                live_training_data.model_path = Path(dirname) / "missing_model.json"
+                connector = LiveDataConnector()
+                decision = connector.ingest_live_metrics({
+                    "source": "chrome_extension",
+                    "host_id": "host-no-model",
+                    "liveId": "live-no-model",
+                    "metrics": {
+                        "online_uv": 30,
+                        "uv": 300,
+                        "pv": 600,
+                        "heat_score": 300,
+                        "pay_amt": 1000,
+                        "pay_byr_rate": 0.02,
+                        "ipv_uv_rate": 0.08,
+                        "comment_uv": 12,
+                    },
+                })
+                self.assertEqual(decision.action_code, "A007")
+                self.assertEqual(decision.current_action, "engage comments")
+            finally:
+                live_training_data.model_path = old_model_path
+
+    def test_host_feedback_stores_action_code(self) -> None:
+        connector = LiveDataConnector()
+        connector.ingest_live_metrics({
+            "source": "chrome_extension",
+            "host_id": "host-feedback-code",
+            "liveId": "live-feedback-code",
+            "metrics": {"online_uv": 10, "uv": 100, "heat_score": 300, "pay_amt": 1000},
+        })
+        result = connector.record_host_feedback(
+            "host-feedback-code",
+            {
+                "action": "explain value",
+                "action_code": "A004",
+                "sentence": "讲价格优势",
+                "current_product": "Kragg Shirt",
+            },
+        )
+        self.assertEqual(result["feedback"]["action_code"], "A004")
 
 
 if __name__ == "__main__":

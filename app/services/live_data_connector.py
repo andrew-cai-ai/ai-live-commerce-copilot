@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 from app.services.live_memory import director_brief, live_memory
-from app.services.live_training_data import ACTION_LIBRARY, extract_comment_topics, infer_product_dna, live_training_data
+from app.services.live_training_data import ACTION_LIBRARY, extract_comment_topics, infer_product_dna, live_training_data, _clean_action_code
 
 load_dotenv()
 
@@ -288,6 +288,7 @@ class LiveDataConnector:
         action = str(payload.get("action") or "").strip()[:120] or "已执行 AI 建议"
         sentence = str(payload.get("sentence") or "").strip()[:240]
         product = str(payload.get("current_product") or payload.get("product") or "").strip()[:160]
+        action_code = _clean_action_code(payload.get("action_code"))
         before_snapshot = session.snapshots[-1] if session.snapshots else None
         product_context = _product_context_for_feedback(session, product, before_snapshot)
         entry = {
@@ -303,6 +304,7 @@ class LiveDataConnector:
             "repeat_count": 1,
             "event_type": "host_feedback",
             "action_label": action,
+            "action_code": action_code,
             "product": product,
             "product_position": product_context.get("product_position"),
             "product_elapsed_seconds": product_context.get("product_elapsed_seconds"),
@@ -686,6 +688,7 @@ class LiveDataConnector:
                 ]
             else:
                 action_code = "A007"
+                current_action, next_action = _action_code_directive(action_code)
                 reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
         next_action = _apply_product_playbook(next_action, product_playbook, current_action)
@@ -1191,6 +1194,7 @@ def _nearest_ai_decision(session: LiveSessionState, timestamp: float) -> dict[st
         selected = min(candidates, key=lambda item: abs(float(item.get("timestamp") or 0) - timestamp))
     return {
         "timestamp": selected.get("timestamp"),
+        "action_code": selected.get("action_code"),
         "decision": selected.get("decision"),
         "mode": selected.get("mode"),
         "reason": selected.get("reason") or [],
@@ -1719,8 +1723,8 @@ def _director_model_state(snapshot: LiveMetricSnapshot, comment_clusters: dict[s
     })
     return {
         "heat": snapshot.heat_score,
-        "ctr": snapshot.item_click_rate or snapshot.ipv_uv_rate,
-        "cvr": snapshot.item_conversion_rate or snapshot.pay_byr_rate,
+        "ctr": snapshot.item_click_rate,
+        "cvr": snapshot.item_conversion_rate,
         "gmv": snapshot.item_gmv,
         "comments": snapshot.comment_uv,
         "online_uv": snapshot.online_uv,

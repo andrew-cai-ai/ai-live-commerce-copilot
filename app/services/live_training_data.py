@@ -65,6 +65,7 @@ class LiveTrainingDataService:
             "action_name": ACTION_LIBRARY[action_code]["name"],
             "ai_decision": ai_decision,
             "host_execution": {
+                "action_code": action_code,
                 "action": host_action.get("action_label") or host_action.get("decision") or "",
                 "sentence": host_action.get("next_action") or "",
                 "product_position": context.get("product_position"),

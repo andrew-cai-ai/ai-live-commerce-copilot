@@ -379,8 +379,18 @@ async def ack_live_boss_intervention(request: Request) -> dict[str, Any]:
     return live_data_connector.ack_boss_intervention(str(host_id or ""), body)
 
 
-@app.post("/live-metrics")
-async def live_metrics(request: Request) -> dict[str, Any]:
+@app.post("/live-metrics", response_model=None)
+async def live_metrics(request: Request) -> dict[str, Any] | JSONResponse:
+    """Deprecated alias for /api/live-ingest. Prefer /api/live-ingest for new clients."""
+    return await _handle_live_ingest(request, include_last_updated=False)
+
+
+@app.post("/api/live-ingest", response_model=None)
+async def live_ingest(request: Request) -> dict[str, Any] | JSONResponse:
+    return await _handle_live_ingest(request, include_last_updated=True)
+
+
+async def _handle_live_ingest(request: Request, *, include_last_updated: bool) -> dict[str, Any] | JSONResponse:
     if not _ingest_token_valid(request):
         return JSONResponse({"ok": False, "error": "invalid_ingest_token"}, status_code=401)
     try:
@@ -390,7 +400,7 @@ async def live_metrics(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         return JSONResponse({"ok": False, "error": "payload_must_be_object"}, status_code=400)
     decision = live_data_connector.ingest_live_metrics(payload)
-    return {
+    response: dict[str, Any] = {
         "ok": True,
         "source": "chrome_extension",
         "valid_live_metrics": decision.valid_live_metrics,
@@ -400,30 +410,9 @@ async def live_metrics(request: Request) -> dict[str, Any]:
         "host_id": decision.host_id,
         "snapshot_count": len(live_data_connector.snapshots),
     }
-
-
-@app.post("/api/live-ingest")
-async def live_ingest(request: Request) -> dict[str, Any]:
-    if not _ingest_token_valid(request):
-        return JSONResponse({"ok": False, "error": "invalid_ingest_token"}, status_code=401)
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
-    if not isinstance(payload, dict):
-        return JSONResponse({"ok": False, "error": "payload_must_be_object"}, status_code=400)
-    decision = live_data_connector.ingest_live_metrics(payload)
-    return {
-        "ok": True,
-        "source": "chrome_extension",
-        "valid_live_metrics": decision.valid_live_metrics,
-        "action_code": decision.action_code,
-        "current_action": decision.current_action,
-        "livestream_mode": decision.livestream_mode,
-        "host_id": decision.host_id,
-        "snapshot_count": len(live_data_connector.snapshots),
-        "last_updated": decision.snapshot.timestamp,
-    }
+    if include_last_updated:
+        response["last_updated"] = decision.snapshot.timestamp
+    return response
 
 
 def _ingest_token_valid(request: Request) -> bool:
@@ -868,6 +857,7 @@ def _render_live_console() -> str:
     .push-mode.show { display: block; }
     .push-mode ul { margin: 8px 0 0; padding-left: 20px; }
     .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: var(--accent-soft); color: var(--accent); font-weight: 950; }
+    .action-code-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; margin-left: 8px; background: #eef2ff; color: #3730a3; font-weight: 900; font-size: 14px; letter-spacing: .04em; }
     .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
@@ -891,6 +881,7 @@ def _render_live_console() -> str:
       <div>
         <section class="panel hero">
           <span class="mode-pill" id="director-mode">等待数据模式</span>
+          <span class="action-code-pill" id="action-code-pill">--</span>
           <span class="label">AI 导演决策</span>
           <div class="action" id="current-action">等待数据</div>
           <span class="label">下一句直接念</span>
@@ -997,6 +988,7 @@ def _render_live_console() -> str:
     let products = [];
     let liveMode = localStorage.getItem("ai_live_mode") || "real";
     let demoTick = 0;
+    let latestDecision = {};
     let currentProductName = "";
     let currentProductStartedAt = Date.now();
     let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
@@ -1269,7 +1261,10 @@ def _render_live_console() -> str:
         })
       });
       const data = await response.json();
-      if (!data.error) renderDecision(data);
+      if (!data.error) {
+        latestDecision = data;
+        renderDecision(data);
+      }
       updateChecklist();
     }
     function buildDemoDecision() {
@@ -1309,6 +1304,7 @@ def _render_live_console() -> str:
       };
     }
     function renderDecision(data) {
+      latestDecision = data || {};
       const snapshot = data.snapshot || {};
       const action = normalizeAction(data.current_action);
       const plan = directorPlan(data.current_action, data.recommended_next_product);
@@ -1316,6 +1312,7 @@ def _render_live_console() -> str:
       const playbook = data.product_playbook || {};
       const sequence = Array.isArray(playbook.sequence) ? playbook.sequence.slice(0, 4).join(" → ") : "";
       document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
+      document.getElementById("action-code-pill").textContent = data.action_code || "--";
       document.getElementById("current-action").textContent = action;
       const sentence = nextSentence(data.current_action, data.next_action);
       document.getElementById("next-sentence").textContent = sentence;
@@ -1384,7 +1381,7 @@ def _render_live_console() -> str:
       const node = document.getElementById("queue");
       const current = (data.snapshot && data.snapshot.current_product) || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品";
       const next = data.recommended_next_product || "等待商品池";
-      node.innerHTML = [["Now", current], ["Next", next], ["Action", normalizeAction(data.current_action)]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
+      node.innerHTML = [["Now", current], ["Next", next], ["Action", normalizeAction(data.current_action)], ["Code", data.action_code || "--"]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
     }
     function answerComment(text) {
       if (/175|170|180|尺码|多大|kg|斤/.test(text)) return "175/70 正常 M，里面加卫衣建议 L。";
@@ -1422,6 +1419,7 @@ def _render_live_console() -> str:
           host_id: hostId(),
           workspace_id: workspaceId,
           action,
+          action_code: latestDecision.action_code || "",
           sentence,
           current_product: currentProduct,
           source: "host_console"
@@ -1567,6 +1565,7 @@ def _render_live_prompter() -> str:
     .boss-alert.show { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; }
     .boss-alert button { background: #fde68a; color: #713f12; border: 0; white-space: nowrap; font-size: 16px; font-weight: 950; }
     .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: rgba(94, 234, 212, .10); color: var(--accent); border: 1px solid var(--line); font-weight: 950; }
+    .action-code-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; margin-left: 8px; background: rgba(99, 102, 241, .12); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, .35); font-weight: 900; font-size: 14px; letter-spacing: .04em; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1591,6 +1590,7 @@ def _render_live_prompter() -> str:
     <section class="stage">
       <section class="main-card">
         <span class="mode-pill" id="prompter-mode">等待数据模式</span>
+        <span class="action-code-pill" id="action-code-pill">--</span>
         <span class="label">AI 导演决策</span>
         <div class="action" id="prompter-action">等待真实数据</div>
         <span class="label">下一句直接念</span>
@@ -1646,6 +1646,7 @@ def _render_live_prompter() -> str:
     let currentProduct = "";
     let productStartedAt = Date.now();
     let demoTick = 0;
+    let latestDecision = {};
     let voiceEnabled = localStorage.getItem("ai_live_voice_enabled") === "1";
     let lastSpokenSignature = "";
     let lastVoiceText = "";
@@ -1775,7 +1776,10 @@ def _render_live_prompter() -> str:
         body: JSON.stringify({ host_id: hostId(), products: productsFromStorage(), payload: { host_id: hostId(), workspace_id: workspaceId } })
       });
       const data = await response.json();
-      if (!data.error) renderDecision(data);
+      if (!data.error) {
+        latestDecision = data;
+        renderDecision(data);
+      }
     }
     function buildDemoDecision() {
       demoTick += 1;
@@ -1803,11 +1807,13 @@ def _render_live_prompter() -> str:
       };
     }
     function renderDecision(data) {
+      latestDecision = data || {};
       const snapshot = data.snapshot || {};
       const rawAction = data.current_action || "";
       const action = normalizeAction(rawAction);
       const actionNode = document.getElementById("prompter-action");
       document.getElementById("prompter-mode").textContent = directorModeLabel(data.livestream_mode);
+      document.getElementById("action-code-pill").textContent = data.action_code || "--";
       actionNode.textContent = action;
       actionNode.classList.remove("warn", "danger");
       const tone = actionTone(rawAction || action);
@@ -1845,7 +1851,7 @@ def _render_live_prompter() -> str:
     }
     function renderQueue(current, next, action) {
       const node = document.getElementById("queue");
-      const rows = [["Now", current || "--"], ["Next", next || "等待推荐"], ["Action", action || "--"]];
+      const rows = [["Now", current || "--"], ["Next", next || "等待推荐"], ["Action", action || "--"], ["Code", latestDecision.action_code || "--"]];
       node.innerHTML = rows.map((row) => '<div class="queue-row"><span>' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
     }
     async function copyNextSentence() {
@@ -1869,6 +1875,7 @@ def _render_live_prompter() -> str:
           host_id: hostId(),
           workspace_id: workspaceId,
           action,
+          action_code: latestDecision.action_code || "",
           sentence,
           current_product: currentProductName,
           source: "host_prompter"

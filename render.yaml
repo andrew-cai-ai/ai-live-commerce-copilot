@@ -3,7 +3,7 @@ services:
     name: ai-live-commerce-copilot
     env: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt -r requirements-dev.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
@@ -18,3 +18,7 @@ services:
         sync: false
       - key: APP_SECRET
         generateValue: true
+      - key: LIVE_INGEST_TOKEN
+        sync: false
+      - key: LATEST_EXTENSION_VERSION
+        value: "0.1.3"
