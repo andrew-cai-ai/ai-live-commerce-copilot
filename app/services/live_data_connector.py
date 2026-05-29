@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.1")
+LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.2")
 
 
 @dataclass
@@ -38,6 +38,7 @@ class ProductEvent:
 class LiveMetricSnapshot:
     timestamp: float
     host_id: str = "default"
+    workspace_id: str = "default"
     online_uv: float = 0.0
     uv: float = 0.0
     pv: float = 0.0
@@ -100,6 +101,7 @@ class LiveDecision:
     snapshot: LiveMetricSnapshot
     source: str
     host_id: str = "default"
+    workspace_id: str = "default"
     missing_metrics: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -167,6 +169,7 @@ class LiveDataConnector:
             display_name = _session_display_name(host_id, session.metadata)
             rows.append({
                 "host_id": host_id,
+                "workspace_id": _workspace_id_from_session_key(host_id, session.latest_ingested_payload),
                 "display_name": display_name,
                 "metadata": dict(session.metadata),
                 "live_id": _pick(session.latest_ingested_payload or {}, "liveId", "live_id", "room_id") or host_id,
@@ -192,7 +195,7 @@ class LiveDataConnector:
                 "product_level_connected": _has_product_level_metrics(latest_snapshot) if latest_snapshot else False,
                 "metric_keys": sorted(
                     key for key, value in (session.latest_ingested_payload or {}).items()
-                    if key not in {"source", "liveId", "live_id", "host_id", "room_id", "timestamp", "captured_api", "extension_version", "interactSecKill"}
+                    if key not in {"source", "liveId", "live_id", "host_id", "workspace_id", "workspaceId", "binding_code", "bindingCode", "room_id", "timestamp", "captured_api", "extension_version", "interactSecKill"}
                     and value is not None
                 ),
             })
@@ -353,6 +356,7 @@ class LiveDataConnector:
         return LiveMetricSnapshot(
             timestamp=time.time(),
             host_id=host_id,
+            workspace_id=_workspace_id_from_session_key(host_id, data),
             online_uv=_to_number(_pick(total_stats, "online_uv", "onlineUv")),
             uv=_to_number(_pick(total_stats, "uv")),
             pv=_to_number(_pick(total_stats, "pv")),
@@ -527,6 +531,7 @@ class LiveDataConnector:
             snapshot=snapshot,
             source=snapshot.source,
             host_id=snapshot.host_id,
+            workspace_id=snapshot.workspace_id,
             missing_metrics=missing_metrics,
         )
 
@@ -657,7 +662,51 @@ def _host_id_from_payload(payload: Any, explicit_host_id: str | None = None) -> 
         or _find_value(payload, "liveId")
         or _find_value(payload, "live_id")
     )
-    return _clean_host_id(value)
+    host_id = _clean_host_id(value)
+    workspace_id = _workspace_id_from_payload(payload)
+    return _session_key(workspace_id, host_id)
+
+
+def _workspace_id_from_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return "default"
+    value = (
+        _pick(payload, "workspace_id", "workspaceId", "workspace", "binding_code", "bindingCode")
+        or _find_value(payload, "workspace_id")
+        or _find_value(payload, "workspaceId")
+        or _find_value(payload, "binding_code")
+        or _find_value(payload, "bindingCode")
+    )
+    return _clean_workspace_id(value)
+
+
+def _workspace_id_from_session_key(host_id: str, payload: Any = None) -> str:
+    workspace_id = _workspace_id_from_payload(payload)
+    if workspace_id != "default":
+        return workspace_id
+    text = str(host_id or "")
+    if ":" in text:
+        workspace, _room = text.split(":", 1)
+        return _clean_workspace_id(workspace)
+    return "default"
+
+
+def _session_key(workspace_id: str, host_id: str) -> str:
+    clean_workspace = _clean_workspace_id(workspace_id)
+    clean_host = _clean_host_id(host_id)
+    if clean_workspace == "default":
+        return clean_host
+    if clean_host.startswith(f"{clean_workspace}:"):
+        return clean_host
+    return f"{clean_workspace}:{clean_host}"
+
+
+def _clean_workspace_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"None", "null", "undefined"}:
+        return "default"
+    text = re.sub(r"[^A-Za-z0-9_.:-]+", "-", text)
+    return text[:48] or "default"
 
 
 def _clean_host_id(value: Any) -> str:
@@ -672,6 +721,7 @@ def _snapshot_summary(snapshot: LiveMetricSnapshot) -> dict[str, Any]:
     return {
         "timestamp": snapshot.timestamp,
         "host_id": snapshot.host_id,
+        "workspace_id": snapshot.workspace_id,
         "source": snapshot.source,
         "current_product": snapshot.current_product,
         "online_uv": snapshot.online_uv,
@@ -778,6 +828,7 @@ def _boss_room_card(session: dict[str, Any]) -> dict[str, Any]:
     score = _host_execution_score(session)
     return {
         "host_id": session.get("host_id", "default"),
+        "workspace_id": session.get("workspace_id", "default"),
         "display_name": session.get("display_name") or session.get("host_id", "default"),
         "pay_amt": float(session.get("pay_amt") or 0),
         "online_uv": float(session.get("online_uv") or 0),
@@ -827,6 +878,7 @@ def _boss_risk_card(session: dict[str, Any]) -> dict[str, Any]:
     return {
         "level": level,
         "host_id": session.get("host_id", "default"),
+        "workspace_id": session.get("workspace_id", "default"),
         "display_name": session.get("display_name") or session.get("host_id", "default"),
         "reason": reason,
         "action": action,
@@ -898,7 +950,25 @@ def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
     events = payload.get("events")
     if isinstance(events, list):
         normalized["interactSecKill"] = events
-    for key in ("source", "liveId", "live_id", "host_id", "hostId", "room_id", "roomId", "timestamp", "captured_at", "captured_api", "extension_version", "extensionVersion"):
+    for key in (
+        "source",
+        "liveId",
+        "live_id",
+        "host_id",
+        "hostId",
+        "workspace_id",
+        "workspaceId",
+        "workspace",
+        "binding_code",
+        "bindingCode",
+        "room_id",
+        "roomId",
+        "timestamp",
+        "captured_at",
+        "captured_api",
+        "extension_version",
+        "extensionVersion",
+    ):
         if payload.get(key) is not None:
             normalized[key] = payload[key]
     normalized["source"] = payload.get("source") or "chrome_extension"

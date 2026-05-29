@@ -12,8 +12,21 @@
   const EXTENSION_VERSION = chrome.runtime && chrome.runtime.getManifest
     ? chrome.runtime.getManifest().version
     : "unknown";
+  const CONFIG_KEY = "aiLiveDirectorConfig";
   function now() {
     return Date.now();
+  }
+
+  function getConfig() {
+    return new Promise((resolve) => {
+      if (!chrome.storage || !chrome.storage.local) {
+        resolve({});
+        return;
+      }
+      chrome.storage.local.get([CONFIG_KEY], (result) => {
+        resolve((result && result[CONFIG_KEY]) || {});
+      });
+    });
   }
 
   function updateStatus(patch) {
@@ -71,10 +84,17 @@
 
     if (event.data.type !== "AI_LIVE_DIRECTOR_METRICS") return;
     const payload = event.data.payload || {};
+    const config = await getConfig();
+    const workspaceId = String(config.workspace_id || config.binding_code || "").trim();
+    if (workspaceId) {
+      payload.workspace_id = workspaceId;
+      payload.binding_code = workspaceId;
+    }
     payload.extension_version = payload.extension_version || EXTENSION_VERSION;
     updateStatus({
       lastPayloadReadyAt: now(),
       extensionVersion: EXTENSION_VERSION,
+      workspaceId: workspaceId || "",
       hostId: payload.host_id || payload.liveId || "",
       liveId: payload.liveId || "",
       metricKeys: Object.keys(payload.metrics || {}),

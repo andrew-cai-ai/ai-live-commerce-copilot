@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "AI Live Director Taobao Connector",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Captures Taobao live assistant metric responses and sends normalized metrics to the local AI Live Director.",
-  "permissions": ["activeTab", "scripting", "tabs"],
+  "permissions": ["activeTab", "scripting", "tabs", "storage"],
   "action": {
     "default_title": "AI Live Copilot",
     "default_popup": "popup.html"

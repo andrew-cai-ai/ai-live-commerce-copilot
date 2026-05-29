@@ -1,8 +1,10 @@
 let manualInjectOverride = null;
 let memoryStatus = {};
+const CONFIG_KEY = "aiLiveDirectorConfig";
 
 document.addEventListener("DOMContentLoaded", () => {
   setText("popup-js", "loaded", "good");
+  loadWorkspaceConfig();
 });
 
 function setText(id, text, className = "") {
@@ -37,6 +39,7 @@ function render(status) {
   setText("last-captured", timeText(status.lastCapturedAt));
   setText("last-sent", timeText(status.lastSentAt));
   setText("host-id", status.hostId || status.liveId || "--");
+  setText("workspace-label", status.workspaceId || "--", status.workspaceId ? "good" : "");
   setText("live-id", status.liveId || "--");
   setText("extension-version", status.extensionVersion || "--");
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
@@ -70,6 +73,35 @@ function render(status) {
     return;
   }
   hint.textContent = "链路已通。回到本地报告页，Payload source 应显示 extension。";
+}
+
+function loadWorkspaceConfig() {
+  if (!chrome.storage || !chrome.storage.local) {
+    setText("workspace-label", "--", "warn");
+    return;
+  }
+  chrome.storage.local.get([CONFIG_KEY], (result) => {
+    const config = (result && result[CONFIG_KEY]) || {};
+    const workspaceId = String(config.workspace_id || "").trim();
+    const input = document.getElementById("workspace-id");
+    if (input) input.value = workspaceId;
+    setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
+    updateStatus({ workspaceId });
+  });
+}
+
+function saveWorkspaceConfig() {
+  const input = document.getElementById("workspace-id");
+  const workspaceId = String((input && input.value) || "").trim();
+  const config = { workspace_id: workspaceId, binding_code: workspaceId };
+  if (!chrome.storage || !chrome.storage.local) {
+    updateStatus({ lastError: "chrome.storage is unavailable. Reload extension and check permissions." }, refresh);
+    return;
+  }
+  chrome.storage.local.set({ [CONFIG_KEY]: config }, () => {
+    setText("workspace-label", workspaceId || "default", workspaceId ? "good" : "");
+    updateStatus({ workspaceId, lastError: "" }, refresh);
+  });
 }
 
 function setStep(id, state, text) {
@@ -264,6 +296,7 @@ function refresh() {
 }
 
 document.getElementById("inject-now").addEventListener("click", injectCurrentTab);
+document.getElementById("save-workspace").addEventListener("click", saveWorkspaceConfig);
 
 document.getElementById("clear-status").addEventListener("click", () => {
   memoryStatus = {};

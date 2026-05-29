@@ -115,11 +115,50 @@
       .step.active .dot { background: #fef3c7; color: var(--warn); }
       .step b { display: block; }
       .step span { color: var(--muted); }
+      .config {
+        display: grid;
+        gap: 6px;
+        margin: 0 0 10px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+      .config label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .config-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 76px;
+        gap: 6px;
+      }
+      .config input {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+        font-size: 12px;
+      }
+      .config button {
+        margin: 0;
+        padding: 8px;
+      }
     </style>
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
-    <div class="version">Debug build: 2026-05-28-v14 · Extension: 0.1.1 · Cloud: ai-live-commerce-copilot.onrender.com</div>
+    <div class="version">Debug build: 2026-05-28-v15 · Extension: 0.1.2 · Cloud: ai-live-commerce-copilot.onrender.com</div>
+    <div class="config">
+      <label for="workspace-id">老板/门店绑定码</label>
+      <div class="config-row">
+        <input id="workspace-id" placeholder="例如 boss-a 或 store-01">
+        <button id="save-workspace" type="button">保存</button>
+      </div>
+      <div class="hint" style="margin:0; background:#f0fdf4; color:#047857;">保存后，本电脑采集到的数据会归到这个老板/门店工作区。</div>
+    </div>
     <div class="steps">
       <div class="step" id="step-page"><div class="dot">1</div><div><b>打开淘宝直播中控</b><span id="step-page-text">等待检测当前页面</span></div></div>
       <div class="step" id="step-inject"><div class="dot">2</div><div><b>注入采集脚本</b><span id="step-inject-text">点击下方按钮或刷新页面</span></div></div>
@@ -138,6 +177,7 @@
       <div class="row"><span>Last captured</span><b id="last-captured">--</b></div>
       <div class="row"><span>Last sent</span><b id="last-sent">--</b></div>
       <div class="row"><span>Host / room ID</span><b id="host-id">--</b></div>
+      <div class="row"><span>Workspace</span><b id="workspace-label">default</b></div>
       <div class="row"><span>Live ID</span><b id="live-id">--</b></div>
       <div class="row"><span>Extension version</span><b id="extension-version">--</b></div>
       <div class="row"><span>Metrics</span><b id="metric-keys">--</b></div>

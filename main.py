@@ -1344,7 +1344,7 @@ def _render_install_guide() -> str:
   <main>
     <div class="hero">
       <h1>Chrome 插件安装教程</h1>
-      <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.1</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化。</p>
+      <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.2</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化；主播可在插件里填写老板/门店绑定码。</p>
       <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
       <p><a href="/live">打开主播控制台</a> · <a href="/live/prompter">打开主播大字提词器</a> · <a href="/">返回首页</a></p>
     </div>
@@ -1352,6 +1352,7 @@ def _render_install_guide() -> str:
       <section class="step"><div><h2>下载并解压插件包</h2><p>点击上方下载，得到 zip 文件后先解压成文件夹。不要直接选择 zip。</p></div></section>
       <section class="step"><div><h2>打开 Chrome 扩展程序页面</h2><p>在 Chrome 地址栏输入 <code>chrome://extensions</code>，右上角打开 Developer Mode / 开发者模式。</p></div></section>
       <section class="step"><div><h2>加载插件文件夹</h2><p>点击 <code>Load unpacked</code> / 加载已解压的扩展程序，选择刚才解压出来的插件文件夹。</p></div></section>
+      <section class="step"><div><h2>填写老板/门店绑定码</h2><p>点击插件图标，在“老板/门店绑定码”里填老板给主播的代码，例如 <code>boss-a</code> 或 <code>store-01</code>，这样数据会自动归到对应工作区。</p></div></section>
       <section class="step"><div><h2>打开淘宝直播中控</h2><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code> 的实时直播中控页面。</p></div></section>
       <section class="step"><div><h2>点击插件并检查 4 步状态</h2><p>插件弹窗里看到“捕获实时接口”和“发送到云端系统”完成后，回到主播控制台。</p></div></section>
       <section class="step"><div><h2>进入主播控制台</h2><p>打开 <a href="/live">/live</a>。如果只有一个活跃直播间，系统会自动连接；多人同时直播时，选择对应 Host / room ID。</p></div></section>
