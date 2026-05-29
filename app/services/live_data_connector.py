@@ -1113,9 +1113,9 @@ def _effect_metrics(snapshot: LiveMetricSnapshot | None) -> dict[str, float]:
         return {}
     return {
         "timestamp": snapshot.timestamp,
-        "ctr": float(snapshot.item_click_rate or snapshot.ipv_uv_rate or 0),
-        "cvr": float(snapshot.item_conversion_rate or snapshot.pay_byr_rate or 0),
-        "gmv": float(snapshot.item_gmv or snapshot.pay_amt_5min_d_live or snapshot.pay_amt or 0),
+        "ctr": float(snapshot.item_click_rate or 0),
+        "cvr": float(snapshot.item_conversion_rate or 0),
+        "gmv": float(snapshot.item_gmv or 0),
         "heat": float(snapshot.heat_score or 0),
         "comments": float(snapshot.comment_uv or 0),
         "online_uv": float(snapshot.online_uv or 0),

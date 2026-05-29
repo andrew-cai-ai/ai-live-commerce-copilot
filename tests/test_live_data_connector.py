@@ -4,6 +4,8 @@ from app.services.inventory_import import _normalize_taobao_payload
 from app.services.live_data_connector import (
     LATEST_EXTENSION_VERSION,
     LiveDataConnector,
+    LiveMetricSnapshot,
+    _effect_metrics,
     _extract_taobao_encoded_metrics,
     _normalize_ingested_payload,
     _parse_encoded_metric_row,
@@ -125,6 +127,35 @@ class LiveDataConnectorTests(unittest.TestCase):
         self.assertEqual(snapshot.item_gmv, 0)
         self.assertEqual(snapshot.stay_time_pu, 0)
         self.assertEqual(snapshot.look_time_5min_avg_d_live, 52)
+
+    def test_effect_metrics_do_not_use_room_level_fallback(self) -> None:
+        room_only = LiveMetricSnapshot(
+            timestamp=1.0,
+            host_id="host-effect",
+            ipv_uv_rate=0.12,
+            pay_byr_rate=0.02,
+            pay_amt=1000,
+            pay_amt_5min_d_live=800,
+        )
+        metrics = _effect_metrics(room_only)
+        self.assertEqual(metrics["ctr"], 0)
+        self.assertEqual(metrics["cvr"], 0)
+        self.assertEqual(metrics["gmv"], 0)
+
+        product_level = LiveMetricSnapshot(
+            timestamp=2.0,
+            host_id="host-effect",
+            ipv_uv_rate=0.12,
+            pay_byr_rate=0.02,
+            pay_amt=1000,
+            item_click_rate=0.08,
+            item_conversion_rate=0.03,
+            item_gmv=500,
+        )
+        product_metrics = _effect_metrics(product_level)
+        self.assertEqual(product_metrics["ctr"], 0.08)
+        self.assertEqual(product_metrics["cvr"], 0.03)
+        self.assertEqual(product_metrics["gmv"], 500)
 
     def test_product_switch_detection_for_sample_quality(self) -> None:
         connector = LiveDataConnector()

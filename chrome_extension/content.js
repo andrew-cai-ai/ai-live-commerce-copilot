@@ -123,7 +123,11 @@
           });
           return;
         }
-        lastError = `POST ${endpoint} returned HTTP ${response.status}`;
+        if (response.status === 401) {
+          lastError = `POST ${endpoint} returned HTTP 401. Check ingest token in extension popup.`;
+        } else {
+          lastError = `POST ${endpoint} returned HTTP ${response.status}`;
+        }
       } catch (error) {
         lastError = `POST ${endpoint} failed: ${error.message}`;
       }

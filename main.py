@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import html
 import io
 import os
@@ -430,7 +431,7 @@ def _ingest_token_valid(request: Request) -> bool:
     header_token = request.headers.get("X-Live-Ingest-Token", "").strip()
     authorization = request.headers.get("Authorization", "").strip()
     bearer_token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
-    return header_token == expected or bearer_token == expected
+    return hmac.compare_digest(header_token, expected) or hmac.compare_digest(bearer_token, expected)
 
 
 @app.get("/download/chrome-extension")
