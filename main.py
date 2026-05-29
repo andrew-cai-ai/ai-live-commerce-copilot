@@ -129,6 +129,13 @@ def install_guide(request: Request) -> str:
     return _render_install_guide()
 
 
+@app.get("/workspace/{workspace_id}", response_class=HTMLResponse)
+def workspace_onboarding(request: Request, workspace_id: str) -> str:
+    if not is_authenticated(request):
+        return _render_login_form()
+    return _render_workspace_onboarding(workspace_id)
+
+
 @app.get("/admin/live", response_class=HTMLResponse)
 def admin_live(request: Request) -> str:
     if not is_authenticated(request):
@@ -569,7 +576,7 @@ def _render_form(
     <form method="post" action="/logout" style="margin-top: 14px; padding: 0; border: 0; box-shadow: none; background: transparent;">
       <button type="submit" style="margin-top: 0; background: #5b6764;">退出登录</button>
     </form>
-    <p><a href="/boss">老板总控看板</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">主播大字提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
+    <p><a href="/boss">老板总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">主播大字提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
       <label for="inventory_text">库存商品</label>
@@ -791,6 +798,9 @@ def _render_live_console() -> str:
     let demoTick = 0;
     let currentProductName = "";
     let currentProductStartedAt = Date.now();
+    const urlParams = new URLSearchParams(location.search);
+    const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
+    if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtPercent(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? (numeric * 100).toFixed(1) + "%" : "--"; }
@@ -891,7 +901,8 @@ def _render_live_console() -> str:
         return;
       }
       try {
-        const response = await fetch("/api/live/sessions");
+        const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
+        const response = await fetch("/api/live/sessions" + query);
         const data = await response.json();
         const sessions = Array.isArray(data.sessions) ? data.sessions : [];
         const fresh = sessions.filter((item) => item.age_seconds === null || item.age_seconds <= 60).slice(0, 6);
@@ -916,6 +927,7 @@ def _render_live_console() -> str:
           products: productsFromInput(),
           payload: {
             host_id: hostId(),
+            workspace_id: workspaceId,
             viewer_comments: comments
           }
         })
@@ -1048,7 +1060,7 @@ def _render_live_console() -> str:
     document.getElementById("save-host").addEventListener("click", () => { setHostId(hostId()); saveSessionMeta(); refreshDecision(); });
     document.getElementById("save-session-meta").addEventListener("click", () => { saveSessionMeta(); });
     document.getElementById("comments").addEventListener("input", () => { renderComments(); refreshDecision(); });
-    setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     bindProductList();
     setMode(liveMode);
     refreshSessions(); refreshDecision();
@@ -1169,6 +1181,9 @@ def _render_live_prompter() -> str:
     let currentProduct = "";
     let productStartedAt = Date.now();
     let demoTick = 0;
+    const urlParams = new URLSearchParams(location.search);
+    const workspaceId = urlParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
+    if (workspaceId) localStorage.setItem("ai_live_workspace_id", workspaceId);
     function hostId() { return (document.getElementById("host-id-input").value.trim() || localStorage.getItem("ai_live_host_id") || "default"); }
     function setHostId(value) {
       const next = value || "default";
@@ -1215,7 +1230,8 @@ def _render_live_prompter() -> str:
     }
     async function autoPickFreshHost() {
       try {
-        const response = await fetch("/api/live/sessions");
+        const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
+        const response = await fetch("/api/live/sessions" + query);
         const data = await response.json();
         const sessions = Array.isArray(data.sessions) ? data.sessions : [];
         const fresh = sessions.filter((item) => item.age_seconds === null || item.age_seconds <= 60);
@@ -1232,7 +1248,7 @@ def _render_live_prompter() -> str:
       const response = await fetch("/api/live/decision", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ host_id: hostId(), products: productsFromStorage(), payload: { host_id: hostId() } })
+        body: JSON.stringify({ host_id: hostId(), products: productsFromStorage(), payload: { host_id: hostId(), workspace_id: workspaceId } })
       });
       const data = await response.json();
       if (!data.error) renderDecision(data);
@@ -1306,7 +1322,7 @@ def _render_live_prompter() -> str:
       node.innerHTML = rows.map((row) => '<div class="queue-row"><span>' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
     }
     document.getElementById("connect-host").addEventListener("click", () => { setHostId(hostId()); refreshDecision(); });
-    setHostId(new URLSearchParams(location.search).get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
+    setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     autoPickFreshHost().then(refreshDecision);
     window.setInterval(refreshDecision, 5000);
     window.setInterval(renderTimer, 1000);
@@ -1359,6 +1375,90 @@ def _render_install_guide() -> str:
       <section class="step"><div><h2>给主播打开大字提词器</h2><p>开播时建议把 <a href="/live/prompter">/live/prompter</a> 放在主播旁边屏幕，只显示“现在做什么”和“下一句怎么说”。</p></div></section>
     </div>
     <div class="note">如果没有正在直播，插件可能抓不到目标接口。这不是报错，可以先在 /live 使用“演示模式”培训主播。</div>
+  </main>
+</body>
+</html>"""
+
+
+def _render_workspace_onboarding(workspace_id: str) -> str:
+    clean_workspace_id = "".join(char if char.isalnum() or char in "_.:-" else "-" for char in workspace_id.strip())[:48] or "default"
+    safe_workspace_id = html.escape(clean_workspace_id)
+    boss_url = f"/boss?workspace_id={safe_workspace_id}"
+    live_url = f"/live?workspace_id={safe_workspace_id}"
+    prompter_url = f"/live/prompter?workspace_id={safe_workspace_id}"
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>客户交付页 - {safe_workspace_id}</title>
+  <style>
+    :root {{ color-scheme: light; --ink: #111827; --muted: #64706c; --line: #d8e1dd; --paper: #f5f8f6; --panel: #fff; --accent: #0c6b58; --accent-soft: #e0f1ea; --warn: #a16207; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--paper); color: var(--ink); }}
+    main {{ max-width: 1080px; margin: 0 auto; padding: 32px 18px 56px; }}
+    header {{ display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }}
+    h1 {{ margin: 0; font-size: clamp(32px, 5vw, 56px); line-height: 1.04; }}
+    h2 {{ margin: 0 0 10px; font-size: 20px; }}
+    p {{ color: var(--muted); line-height: 1.6; }}
+    a {{ color: var(--accent); font-weight: 900; text-decoration: none; }}
+    .hero, .panel, .link-card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }}
+    .hero {{ display: grid; gap: 10px; margin-bottom: 14px; }}
+    .code {{ display: inline-flex; align-items: center; border-radius: 8px; background: #0f172a; color: #fff; padding: 12px 14px; font-size: 28px; font-weight: 950; letter-spacing: 0; width: fit-content; }}
+    .grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }}
+    .link-card b {{ display: block; font-size: 18px; margin-bottom: 6px; }}
+    .button {{ display: inline-flex; justify-content: center; border-radius: 8px; background: var(--accent); color: #fff; padding: 11px 13px; margin-top: 10px; }}
+    .steps {{ display: grid; gap: 10px; counter-reset: step; }}
+    .step {{ counter-increment: step; display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fff; }}
+    .step:before {{ content: counter(step); width: 36px; height: 36px; border-radius: 999px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 950; }}
+    .step h3 {{ margin: 0 0 4px; font-size: 17px; }}
+    .note {{ border: 1px solid rgba(161, 98, 7, .28); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 14px; font-weight: 850; }}
+    code {{ background: #edf4f1; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }}
+    @media (max-width: 900px) {{ header {{ display: block; }} .grid {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>客户交付页</h1>
+        <p>把这一页发给老板或主播。主播按绑定码安装插件，老板用专属看板看自己的直播间。</p>
+      </div>
+      <div><a href="/">返回工作台</a> · <a href="/install">插件教程</a></div>
+    </header>
+    <section class="hero">
+      <h2>老板/门店绑定码</h2>
+      <div class="code" id="workspace-code">{safe_workspace_id}</div>
+      <p>主播 Chrome 插件里填写这个绑定码后，实时数据会进入该工作区。老板看板可以只显示这个绑定码下面的直播间。</p>
+    </section>
+    <section class="grid">
+      <article class="link-card">
+        <b>老板专属看板</b>
+        <p>看 GMV、风险直播间、主播执行评分。</p>
+        <a class="button" href="{boss_url}">打开老板看板</a>
+      </article>
+      <article class="link-card">
+        <b>主播控制台</b>
+        <p>主播/运营填写商品队列、评论、查看实时建议。</p>
+        <a class="button" href="{live_url}">打开主播控制台</a>
+      </article>
+      <article class="link-card">
+        <b>大字提词器</b>
+        <p>直播时放在旁边屏幕，只看当前动作和下一句话。</p>
+        <a class="button" href="{prompter_url}">打开大字提词器</a>
+      </article>
+    </section>
+    <section class="panel">
+      <h2>给主播的安装步骤</h2>
+      <div class="steps">
+        <section class="step"><div><h3>下载 Chrome 插件包</h3><p>先下载并解压插件包，不要直接选择 zip。</p><a class="button" href="/download/chrome-extension">下载插件包</a></div></section>
+        <section class="step"><div><h3>加载插件</h3><p>打开 <code>chrome://extensions</code>，开启开发者模式，点击 Load unpacked / 加载已解压的扩展程序。</p></div></section>
+        <section class="step"><div><h3>填写绑定码</h3><p>点击插件图标，在“老板/门店绑定码”里填写 <code>{safe_workspace_id}</code>，然后保存。</p></div></section>
+        <section class="step"><div><h3>打开淘宝直播中控</h3><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code>，进入实时直播中控页。</p></div></section>
+        <section class="step"><div><h3>确认连接</h3><p>插件显示“捕获实时接口”和“发送到云端系统”成功后，老板看板会出现该直播间。</p></div></section>
+      </div>
+    </section>
+    <p class="note">交付建议：每个老板或门店使用一个独立绑定码，例如 <code>brand-a</code>、<code>store-vancouver</code>。不要让不同客户共用同一个绑定码。</p>
   </main>
 </body>
 </html>"""
