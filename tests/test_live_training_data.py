@@ -103,6 +103,22 @@ class LiveTrainingDataTests(unittest.TestCase):
             prediction = service.predict_director_model_v0({"heat": 500})
             self.assertEqual(prediction["status"], "missing_model")
 
+    def test_predict_v0_rejects_unknown_action_code(self) -> None:
+        with tempfile.TemporaryDirectory() as dirname:
+            model_path = Path(dirname) / "model.json"
+            service = LiveTrainingDataService(
+                Path(dirname) / "training.jsonl",
+                Path(dirname) / "graph.json",
+                model_path,
+            )
+            model_path.write_text(
+                '{"model":{"actions":["BAD"],"action_counts":{"BAD":3},"feature_counts":{}}}',
+                encoding="utf-8",
+            )
+            prediction = service.predict_director_model_v0({"heat": 500})
+            self.assertEqual(prediction["status"], "invalid_action")
+            self.assertEqual(prediction["action_code"], "")
+
     def test_training_sample_prefers_explicit_action_code(self) -> None:
         with tempfile.TemporaryDirectory() as dirname:
             service = LiveTrainingDataService(

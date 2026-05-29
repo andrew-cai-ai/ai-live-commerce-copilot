@@ -330,6 +330,9 @@ class LiveTrainingDataService:
         if not isinstance(model, dict):
             return {"status": "invalid_model", "action_code": "", "confidence": 0.0}
         action_code, scores = _predict_director_action_with_scores(model, state)
+        action_code = _clean_action_code(action_code)
+        if not action_code:
+            return {"status": "invalid_action", "action_code": "", "confidence": 0.0}
         confidence = _prediction_confidence(scores, action_code)
         return {
             "status": "predicted",
