@@ -1000,7 +1000,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         hasPastedTextareaContent: false,
         payloadParseSuccess: false,
         hasActiveConnectorSession: false,
-        activeConnectorHostId: ""
+        activeConnectorHostId: "",
+        latestConnectorMetrics: null,
+        latestConnectorSource: "",
+        latestConnectorAt: 0
       };
 
       function initialLiveHostId() {
@@ -1478,7 +1481,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.latestMetrics = null;
           liveDirectorState.hasValidPastedPayload = false;
           liveDirectorState.payloadParseSuccess = false;
-          updatePayloadDebug("--", false, null);
+          if (!liveDirectorState.latestConnectorMetrics) {
+            updatePayloadDebug("--", false, null);
+          }
           return null;
         }
         const payloadHasValidMetrics = hasValidNormalizedPayload(payload);
@@ -1937,14 +1942,18 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }
         if (liveDirectorState.hasActiveConnectorSession || liveHostId() !== "default") {
           const waitingHost = liveDirectorState.activeConnectorHostId || liveHostId();
-          document.getElementById("live-status").textContent = "Waiting for real connector data · " + waitingHost + " · mock disabled";
-          updatePayloadDebug("connector", false, {
-            host_id: waitingHost,
-            online_uv: 0,
-            heat_score_raw: 0,
-            pay_amt: 0,
-            source: "connector"
-          });
+          document.getElementById("live-status").textContent = "等待插件新数据 · " + waitingHost + " · 已禁用模拟数据";
+          if (liveDirectorState.latestConnectorMetrics) {
+            updatePayloadDebug(liveDirectorState.latestConnectorSource || "extension", true, liveDirectorState.latestConnectorMetrics);
+          } else {
+            updatePayloadDebug("connector", false, {
+              host_id: waitingHost,
+              online_uv: 0,
+              heat_score_raw: 0,
+              pay_amt: 0,
+              source: "connector"
+            });
+          }
           return;
         }
         const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
@@ -2194,6 +2203,17 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         }).join("");
       }
 
+      function currentTimelineItems(items, hasValidMetrics) {
+        const list = Array.isArray(items) ? items : [];
+        if (!hasValidMetrics) {
+          return list;
+        }
+        return list.filter(function(item) {
+          const text = String((item && item.decision) || "");
+          return !text.includes("数据不完整") && !text.includes("No valid live metrics");
+        });
+      }
+
       function normalizeDecisionName(action) {
         const text = String(action || "").toLowerCase();
         if (text.includes("no valid live metrics")) { return "No valid live metrics detected"; }
@@ -2232,6 +2252,11 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           : data.source === "real_api"
           ? "connector"
           : "mock";
+        if (!noValidMetrics) {
+          liveDirectorState.latestConnectorMetrics = metrics;
+          liveDirectorState.latestConnectorSource = debugSource;
+          liveDirectorState.latestConnectorAt = Date.now();
+        }
         updatePayloadDebug(debugSource, !noValidMetrics, metrics);
 
         document.getElementById("live-status").textContent = (
@@ -2270,7 +2295,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         renderSwitchRecommendation(data.switch_recommendation);
         renderCommentClusters(data.comment_clusters);
         renderLearnedRecommendations(data.learned_recommendations);
-        renderDirectorTimeline(data.timeline);
+        renderDirectorTimeline(currentTimelineItems(data.timeline, !noValidMetrics));
         setActiveAction(chooseAction(decision.decision));
         updateHostAssistant(metrics, decision);
         updateRecommendedQueue(queue);
