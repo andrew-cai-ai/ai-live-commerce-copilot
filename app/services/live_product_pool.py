@@ -15,8 +15,17 @@ class LiveProductPoolStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or DEFAULT_PRODUCT_POOL_PATH
 
-    def save(self, products: list[Any], workspace_id: str = "") -> dict[str, Any]:
-        rows = [_product_row(product, index) for index, product in enumerate(products)]
+    def save(
+        self,
+        products: list[Any],
+        workspace_id: str = "",
+        inventory_items: list[Any] | None = None,
+    ) -> dict[str, Any]:
+        inventory_lookup = _inventory_lookup(inventory_items or [])
+        rows = [
+            _product_row(product, index, inventory_lookup.get(_lookup_key(product)))
+            for index, product in enumerate(products)
+        ]
         rows = [row for row in rows if row.get("name")]
         record = {
             "workspace_id": _clean_workspace_id(workspace_id),
@@ -57,19 +66,31 @@ class LiveProductPoolStore:
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _product_row(product: Any, index: int) -> dict[str, Any]:
-    name = re.sub(r"\s+", " ", str(_pick(product, "name", "product_name") or "")).strip()
+def _product_row(product: Any, index: int, source_item: Any | None = None) -> dict[str, Any]:
+    name = _clean_text(_pick(product, "name", "product_name") or _pick(source_item, "name", "product_name"))
     score = _pick(product, "score")
     inventory = _pick(product, "inventory", "stock")
+    if inventory is None:
+        inventory = _pick(source_item, "inventory", "stock")
     target_price = _pick(product, "target_selling_price", "target_price", "price")
+    if target_price is None:
+        target_price = _pick(source_item, "target_selling_price", "target_price", "price")
     profit_margin = _pick(product, "profit_margin")
     gmv_level = _pick(product, "gmv_level")
-    category = _pick(product, "category")
+    category = _pick(product, "category") or _pick(source_item, "category")
+    sku = _clean_text(_pick(product, "sku", "source_product_id") or _pick(source_item, "sku", "source_product_id"))
+    color = _clean_text(_pick(product, "color") or _pick(source_item, "color"))
+    notes = _clean_text(_pick(product, "notes") or _pick(source_item, "notes"))
     knowledge = getattr(product, "knowledge", None)
     if not category and knowledge is not None:
         category = getattr(knowledge, "category", "")
+    aliases = _product_aliases(name=name, sku=sku, color=color, notes=notes, category=str(category or ""))
     return {
         "name": name,
+        "sku": sku,
+        "color": color,
+        "notes": notes,
+        "aliases": aliases,
         "score": _float_or_default(score, max(0.0, 1 - index * 0.01)),
         "inventory": _float_or_default(inventory, 0),
         "profit_margin": _float_or_default(profit_margin, 0),
@@ -81,12 +102,52 @@ def _product_row(product: Any, index: int) -> dict[str, Any]:
 
 
 def _pick(product: Any, *keys: str) -> Any:
+    if product is None:
+        return None
     for key in keys:
         if isinstance(product, dict) and key in product:
             return product.get(key)
         if hasattr(product, key):
             return getattr(product, key)
     return None
+
+
+def _inventory_lookup(items: list[Any]) -> dict[str, Any]:
+    lookup: dict[str, Any] = {}
+    for item in items:
+        key = _lookup_key(item)
+        if key and key not in lookup:
+            lookup[key] = item
+    return lookup
+
+
+def _lookup_key(product: Any) -> str:
+    return _compact_key(_pick(product, "name", "product_name") or "")
+
+
+def _compact_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9\u4e00-\u9fa5]+", "", str(value or "").lower())
+
+
+def _clean_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _product_aliases(name: str, sku: str, color: str, notes: str, category: str) -> list[str]:
+    aliases: list[str] = []
+    for value in [name, sku, _sku_tail(sku), color, notes, category]:
+        cleaned = _clean_text(value)
+        if cleaned and cleaned not in aliases:
+            aliases.append(cleaned)
+    return aliases[:12]
+
+
+def _sku_tail(value: str) -> str:
+    match = re.search(r"x0*(\d{4,6})", str(value or "").lower())
+    if not match:
+        return ""
+    tail = match.group(1).lstrip("0")
+    return tail or match.group(1)
 
 
 def _float_or_default(value: Any, default: float) -> float:

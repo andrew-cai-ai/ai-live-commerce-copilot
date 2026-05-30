@@ -515,7 +515,11 @@ async def analyze(
         )
         manual_overrides = parse_manual_research_overrides(manual_research_text)
         products = score_products(items, manual_overrides=manual_overrides)
-        live_product_pool.save(products, workspace_id or request.query_params.get("workspace_id", ""))
+        live_product_pool.save(
+            products,
+            workspace_id or request.query_params.get("workspace_id", ""),
+            inventory_items=items,
+        )
         reports = generate_product_reports(products)
         audience_answers = answer_audience_questions(viewer_comments_text)
         taobao_report = None

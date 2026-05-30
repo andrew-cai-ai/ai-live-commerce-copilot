@@ -232,14 +232,16 @@ def _match_inventory_product(current_product: str, products: list[dict[str, Any]
     if not query_tokens or not products:
         return "", 0.0
     query_models = query_tokens.intersection(MODEL_TOKENS)
+    query_codes = _code_tokens(query_tokens)
     best_name = ""
     best_score = 0.0
     for product in products:
         name = _product_name(product)
-        candidate_tokens = set(_product_match_tokens(name))
+        candidate_tokens = set(_product_match_tokens(_product_match_text(product)))
         if not name or not candidate_tokens:
             continue
         candidate_models = candidate_tokens.intersection(MODEL_TOKENS)
+        candidate_codes = _code_tokens(candidate_tokens)
         overlap = query_tokens.intersection(candidate_tokens)
         if not overlap:
             continue
@@ -251,6 +253,13 @@ def _match_inventory_product(current_product: str, products: list[dict[str, Any]
         score = overlap_weight / denominator
         if query_models and not query_models.intersection(candidate_models):
             score *= 0.35
+        if query_codes and candidate_codes:
+            if query_codes.intersection(candidate_codes):
+                score = max(score, 0.94)
+            elif _distinct_submodel_mismatch(query_tokens, candidate_tokens):
+                score *= 0.35
+            elif query_models.intersection(candidate_models):
+                score = max(score, 0.66)
         if _compact_name(name) and _compact_name(name) in _compact_name(current_product):
             score = max(score, 0.92)
         if score > best_score:
@@ -265,30 +274,101 @@ def _product_name(product: dict[str, Any]) -> str:
     return re.sub(r"\s+", " ", str(product.get("name") or product.get("product_name") or "").strip())
 
 
+def _product_match_text(product: dict[str, Any]) -> str:
+    values = [
+        _product_name(product),
+        str(product.get("sku") or ""),
+        str(product.get("color") or ""),
+        str(product.get("notes") or ""),
+        str(product.get("category") or ""),
+    ]
+    aliases = product.get("aliases")
+    if isinstance(aliases, list):
+        values.extend(str(alias) for alias in aliases)
+    return " ".join(value for value in values if value)
+
+
 def _product_match_tokens(text: str) -> list[str]:
     normalized = str(text or "").lower()
-    normalized = re.sub(r"x\d{4,}", " ", normalized)
+    sku_tokens = _sku_tail_tokens(normalized)
     raw_tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fa5]+", normalized)
     tokens: list[str] = []
     for token in raw_tokens:
-        if token in MATCH_STOPWORDS or token.isdigit():
+        if token in MATCH_STOPWORDS:
+            continue
+        if token.isdigit():
+            if len(token) >= 4:
+                tokens.append(token.lstrip("0") or token)
+            continue
+        if re.fullmatch(r"x0*\d{4,6}", token):
             continue
         if len(token) == 1 and token not in {"男", "女"}:
             continue
         tokens.append(token)
+    tokens.extend(sku_tokens)
     if "抓绒" in normalized:
         tokens.append("fleece")
     if "全拉链" in normalized or "拉链" in normalized:
         tokens.extend(["full", "zip"])
     if "连帽" in normalized or "帽衫" in normalized:
         tokens.append("hoody")
+    if "卫衣" in normalized:
+        tokens.extend(["fleece", "pullover", "crew"])
+    if "圆领" in normalized:
+        tokens.append("crew")
+    if "加绒" in normalized or "保暖" in normalized:
+        tokens.append("fleece")
     if "羽绒" in normalized:
         tokens.append("cerium")
     if "马甲" in normalized or "背心" in normalized:
         tokens.append("vest")
     if "裤" in normalized:
         tokens.append("pant")
+    if "打底裤" in normalized:
+        tokens.extend(["bottom", "pant"])
+    if "长袖" in normalized:
+        tokens.extend(["ls", "shirt"])
+    if "短袖" in normalized:
+        tokens.extend(["ss", "shirt"])
+    if "t恤" in normalized or "tee" in normalized:
+        tokens.append("shirt")
+    if "冲锋衣" in normalized or "硬壳" in normalized:
+        tokens.append("jacket")
+    if "防风" in normalized or "软壳" in normalized:
+        tokens.append("softshell")
     return tokens
+
+
+def _sku_tail_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    for match in re.finditer(r"x0*(\d{4,6})", str(text or "").lower()):
+        value = match.group(1)
+        stripped = value.lstrip("0") or value
+        for token in {stripped, value[-4:]}:
+            if token and token not in tokens:
+                tokens.append(token)
+    return tokens
+
+
+def _code_tokens(tokens: set[str]) -> set[str]:
+    return {token for token in tokens if re.fullmatch(r"\d{4,6}", token)}
+
+
+def _distinct_submodel_mismatch(query_tokens: set[str], candidate_tokens: set[str]) -> bool:
+    style_tokens = {
+        "bird",
+        "tile",
+        "lithographica",
+        "logo",
+        "word",
+        "sl",
+        "zip",
+        "full",
+        "crew",
+        "neck",
+        "mid",
+    }
+    return len(query_tokens.intersection(style_tokens) - candidate_tokens.intersection(style_tokens)) >= 2
 
 
 def _compact_name(value: str) -> str:
@@ -296,9 +376,11 @@ def _compact_name(value: str) -> str:
 
 
 def _token_weight(token: str) -> int:
+    if re.fullmatch(r"\d{4,6}", token):
+        return 6
     if token in MODEL_TOKENS:
         return 4
-    if token in {"jacket", "hoody", "hoodie", "fleece", "shirt", "pant", "pants", "vest", "coat", "zip", "full", "neck", "pullover", "bottom"}:
+    if token in {"jacket", "hoody", "hoodie", "fleece", "shirt", "pant", "pants", "vest", "coat", "zip", "full", "neck", "pullover", "bottom", "crew", "ls", "ss", "softshell"}:
         return 2
     return 1
 
