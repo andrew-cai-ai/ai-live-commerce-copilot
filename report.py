@@ -1185,7 +1185,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       }
 
       function totalViewerText(metrics) {
-        if (!metricMissing(metrics, "look_uv_td_d_live")) {
+        if (toNumber(metrics.look_uv_td_d_live) > 0 && !metricMissing(metrics, "look_uv_td_d_live")) {
           return metricNumberText(metrics, "look_uv_td_d_live", metrics.look_uv_td_d_live);
         }
         return metricNumberText(metrics, "uv", metrics.uv || metrics.viewer_count);
@@ -1210,7 +1210,20 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           const normalizedProduct = normalizeName(product.name);
           return normalizedItem && (normalizedItem.includes(normalizedProduct) || normalizedProduct.includes(normalizedItem));
         });
-        return matched || liveProducts[hostProductIndex] || liveProducts[0];
+        if (matched) {
+          return matched;
+        }
+        const fallback = liveProducts[hostProductIndex] || liveProducts[0] || {};
+        if (itemName) {
+          return {
+            name: itemName,
+            score: fallback.score || 0.5,
+            inventory: fallback.inventory || 0,
+            profit_margin: fallback.profit_margin || 0,
+            rank: fallback.rank || 0
+          };
+        }
+        return fallback;
       }
 
       function productContext(metrics) {
@@ -2149,7 +2162,23 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           node.innerHTML = '<div class="timeline-item"><span>--</span>等待实时动作...</div>';
           return;
         }
-        node.innerHTML = items.slice(0, 10).map(function(item) {
+        const compacted = [];
+        items.forEach(function(item) {
+          const previous = compacted[compacted.length - 1];
+          const sameStableState = previous
+            && previous.decision === item.decision
+            && previous.mode === item.mode
+            && Math.abs(toNumber(previous.confidence) - toNumber(item.confidence)) < 0.01;
+          if (sameStableState) {
+            previous.repeat_count = toNumber(previous.repeat_count || 1) + toNumber(item.repeat_count || 1);
+            previous.reason = previous.reason && previous.reason.length ? previous.reason : item.reason;
+            previous.next_action = previous.next_action || item.next_action;
+            previous.last_seen = Math.max(toNumber(previous.last_seen), toNumber(item.last_seen || item.timestamp));
+            return;
+          }
+          compacted.push(Object.assign({}, item));
+        });
+        node.innerHTML = compacted.slice(0, 10).map(function(item) {
           const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
           const tone = item.event_type === "danger" ? "danger" : item.event_type === "warning" ? "warn" : "";
           const marker = timelineMarker(item);
