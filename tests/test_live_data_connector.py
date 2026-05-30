@@ -110,6 +110,28 @@ class LiveDataConnectorTests(unittest.TestCase):
         self.assertEqual(snapshot.pay_byr_rate, 0.0201)
         self.assertEqual(decision.source, "chrome_extension")
 
+    def test_dom_fallback_payload_does_not_block_director(self) -> None:
+        connector = LiveDataConnector()
+        decision = connector.ingest_live_metrics({
+            "source": "chrome_extension",
+            "host_id": "host-dom",
+            "liveId": "live-dom",
+            "captured_api": "dom_live_dashboard",
+            "payload_sections": {"domFallback": True},
+            "metrics": {
+                "pay_amt": 998,
+                "online_uv": 20,
+                "pv": 27,
+                "uv": 50,
+                "current_product": "Kragg Cotton Shirt",
+            },
+        })
+        self.assertTrue(decision.valid_live_metrics)
+        self.assertEqual(decision.missing_metrics, [])
+        self.assertEqual(decision.current_action, "push harder")
+        self.assertEqual(decision.snapshot.pay_amt, 998)
+        self.assertEqual(decision.snapshot.current_product, "Kragg Cotton Shirt")
+
     def test_room_metrics_do_not_fill_product_level_fields(self) -> None:
         connector = LiveDataConnector()
         decision = connector.ingest_live_metrics({

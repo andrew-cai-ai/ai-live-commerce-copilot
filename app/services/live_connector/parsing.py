@@ -125,6 +125,8 @@ def _normalize_ingested_payload(payload: Any) -> dict[str, Any]:
         "timestamp",
         "captured_at",
         "captured_api",
+        "payload_sections",
+        "payloadSections",
         "extension_version",
         "extensionVersion",
     ):
@@ -180,6 +182,8 @@ _DATA_REGION_REQUIRED = (
 
 
 def _missing_required_metrics(data: dict[str, Any]) -> list[str]:
+    if _has_dom_fallback_metrics(data):
+        return []
     total_stats = _find_dict(data, "totalStats")
     if total_stats is None and any(_pick(data, field, _camelize(field)) is not None for field in _TOTAL_STATS_REQUIRED):
         total_stats = data
@@ -197,6 +201,17 @@ def _missing_required_metrics(data: dict[str, Any]) -> list[str]:
     elif total_stats is None and data_region is not None:
         missing.extend(f"dataRegion.{field}" for field in _DATA_REGION_REQUIRED if _pick(data_region, field) is None)
     return missing
+
+
+def _has_dom_fallback_metrics(data: dict[str, Any]) -> bool:
+    sections = _pick(data, "payload_sections", "payloadSections")
+    has_dom_section = isinstance(sections, dict) and bool(_pick(sections, "domFallback", "dom_fallback"))
+    if _pick(data, "captured_api", "capturedApi") != "dom_live_dashboard" and not has_dom_section:
+        return False
+    return any(
+        _to_number(_pick(data, field)) > 0
+        for field in ("pay_amt", "online_uv", "uv", "pv")
+    )
 
 
 def _camelize(value: str) -> str:

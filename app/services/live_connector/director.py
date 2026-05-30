@@ -365,6 +365,28 @@ def decide(
         next_action = "展示吊牌、洗标、拉链和细节"
         reason = ["comment keywords include 真假/正品", "trust is blocking conversion", "show proof now"]
         confidence = 0.86
+    elif snapshot.pay_amt > 0 and snapshot.online_uv > 0 and snapshot.heat_score <= 0:
+        action_code = "A005"
+        current_action = "push harder"
+        next_action = "兜底数据已经看到成交和在线，先承接成交势能，强调库存、尺码和现在下单。"
+        reason = [
+            f"visible pay_amt ¥{int(snapshot.pay_amt)}",
+            f"visible online_uv {int(snapshot.online_uv)}",
+            "limited DOM fallback metrics",
+        ]
+        confidence = 0.62
+        livestream_mode = "Limited live data mode"
+    elif snapshot.uv > 0 and snapshot.pv > 0 and snapshot.heat_score <= 0:
+        action_code = "A004"
+        current_action = "explain value"
+        next_action = "兜底数据看到有人进房和点击商品，先讲价格价值和使用场景，不要立刻切品。"
+        reason = [
+            f"visible uv {int(snapshot.uv)}",
+            f"visible product clicks {int(snapshot.pv)}",
+            "limited DOM fallback metrics",
+        ]
+        confidence = 0.58
+        livestream_mode = "Limited live data mode"
     elif trend_30s["online_uv"] == "up" and trend_30s["heat_score"] == "up" and trend_30s["pay_amt"] == "up":
         action_code = "A005"
         current_action = "continue product"
