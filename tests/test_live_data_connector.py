@@ -128,9 +128,12 @@ class LiveDataConnectorTests(unittest.TestCase):
         })
         self.assertTrue(decision.valid_live_metrics)
         self.assertEqual(decision.missing_metrics, [])
-        self.assertEqual(decision.current_action, "push harder")
+        self.assertEqual(decision.current_action, "continue with light push")
+        self.assertEqual(decision.action_code, "A008")
+        self.assertLess(decision.confidence, 0.7)
         self.assertEqual(decision.livestream_mode, "有限实时数据模式")
         self.assertIn("页面可见成交额 ¥998", decision.reason)
+        self.assertIn("不要强切也不要猛逼单", decision.next_action)
         self.assertEqual(decision.snapshot.pay_amt, 998)
         self.assertEqual(decision.snapshot.current_product, "Kragg Cotton Shirt")
 

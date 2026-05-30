@@ -24,6 +24,8 @@ def _apply_product_playbook(next_action: str, playbook: dict[str, Any], current_
     conversion_line = str(playbook.get("conversion_line") or "").strip()
     if "sizing" in action_text or "尺码" in current_action:
         return f"按商品打法先讲{first_step or '尺码'}：{conversion_line or next_action}"
+    if "light push" in action_text or "有限实时数据" in current_action:
+        return next_action
     if "push" in action_text:
         return conversion_line or next_action
     if "continue" in action_text:
@@ -366,15 +368,15 @@ def decide(
         reason = ["comment keywords include 真假/正品", "trust is blocking conversion", "show proof now"]
         confidence = 0.86
     elif snapshot.pay_amt > 0 and snapshot.online_uv > 0 and snapshot.heat_score <= 0:
-        action_code = "A005"
-        current_action = "push harder"
-        next_action = "兜底数据已经看到成交和在线，先承接成交势能，强调库存、尺码和现在下单。"
+        action_code = "A008"
+        current_action = "continue with light push"
+        next_action = "页面兜底数据看到有成交和在线，先继续讲当前商品，轻推价格、尺码和使用场景，不要强切也不要猛逼单。"
         reason = [
             f"页面可见成交额 ¥{int(snapshot.pay_amt)}",
             f"当前在线 {int(snapshot.online_uv)} 人",
             "当前为页面兜底数据，精细 CTR/CVR 待接口补齐",
         ]
-        confidence = 0.62
+        confidence = 0.58
         livestream_mode = "有限实时数据模式"
     elif snapshot.uv > 0 and snapshot.pv > 0 and snapshot.heat_score <= 0:
         action_code = "A004"
