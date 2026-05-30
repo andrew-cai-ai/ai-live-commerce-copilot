@@ -29,18 +29,20 @@ def build_inventory_items(
     excel_bytes: bytes | None = None,
     excel_filename: str = "",
 ) -> list[InventoryItem]:
-    if taobao_json_text.strip():
-        taobao_items = parse_taobao_inventory_json(taobao_json_text)
-        if taobao_items:
-            return _dedupe_inventory_items(taobao_items)
-        if not excel_bytes and not inventory_text.strip():
-            raise ValueError("淘宝 JSON 中没有 targetProductStatus = 1 的有效商品。")
-
     items: list[InventoryItem] = []
     if excel_bytes:
         items.extend(smart_rows_to_inventory_items(parse_smart_inventory_file(excel_bytes, excel_filename)))
     if inventory_text.strip():
         items.extend(parse_inventory(inventory_text))
+    if items:
+        return _dedupe_inventory_items(items)
+
+    if taobao_json_text.strip():
+        taobao_items = parse_taobao_inventory_json(taobao_json_text)
+        if taobao_items:
+            return _dedupe_inventory_items(taobao_items)
+        raise ValueError("淘宝 JSON 中没有 targetProductStatus = 1 的有效商品。")
+
     if not items:
         raise ValueError("请至少上传 Excel、粘贴淘宝 JSON，或填写一个库存商品。")
     return _dedupe_inventory_items(items)
@@ -56,9 +58,7 @@ def parse_smart_inventory_file(file_bytes: bytes, filename: str = "") -> list[Sm
         return []
     header_index = _detect_header_row(rows)
     if header_index is None:
-        header_index = _first_non_empty_row(rows)
-    if header_index is None:
-        return []
+        return _parse_headerless_inventory_rows(rows)
 
     headers = [_cell_text(value) for value in rows[header_index]]
     mapping = _map_headers(headers, rows[header_index + 1 : header_index + 8])
@@ -72,15 +72,16 @@ def parse_smart_inventory_file(file_bytes: bytes, filename: str = "") -> list[Sm
         product_name = _cell_from_mapping(raw_row, mapping, "product_name")
         if not product_name:
             continue
+        cost_text = _cell_from_mapping(raw_row, mapping, "cost_price")
         parsed.append(
             SmartInventoryRow(
                 product_name=product_name,
                 sku=_cell_from_mapping(raw_row, mapping, "sku"),
                 color=_cell_from_mapping(raw_row, mapping, "color"),
-                cost_price=_optional_float_text(_cell_from_mapping(raw_row, mapping, "cost_price")),
-                cost_currency=_normalize_currency(_cell_from_mapping(raw_row, mapping, "cost_currency")),
+                cost_price=_optional_money_text(cost_text),
+                cost_currency=_infer_cost_currency(cost_text, _cell_from_mapping(raw_row, mapping, "cost_currency")),
                 inventory=_optional_int_text(_cell_from_mapping(raw_row, mapping, "inventory")),
-                target_price=_optional_float_text(_cell_from_mapping(raw_row, mapping, "target_price")),
+                target_price=_optional_money_text(_cell_from_mapping(raw_row, mapping, "target_price")),
                 notes=_cell_from_mapping(raw_row, mapping, "notes"),
             )
         )
@@ -192,13 +193,20 @@ FIELD_KEYWORDS = {
 def _detect_header_row(rows: list[tuple[Any, ...]]) -> int | None:
     best_index = None
     best_score = 0
+    best_fields: set[str] = set()
     for index, row in enumerate(rows[:12]):
         headers = [_cell_text(value) for value in row]
-        score = sum(_header_score(header) for header in headers)
+        fields = {field for header in headers if (field := _field_from_header(header))}
+        score = len(fields)
         if score > best_score:
             best_index = index
             best_score = score
-    return best_index if best_score > 0 else None
+            best_fields = fields
+    if "product_name" in best_fields:
+        return best_index
+    if best_score >= 2 and "sku" in best_fields:
+        return best_index
+    return None
 
 
 def _first_non_empty_row(rows: list[tuple[Any, ...]]) -> int | None:
@@ -244,6 +252,16 @@ def _normalize_currency(value: str) -> str:
     return normalized if normalized in {"CNY", "CAD", "USD"} else "CAD"
 
 
+def _infer_cost_currency(cost_text: str, currency_text: str) -> str:
+    explicit = currency_text.strip().upper()
+    if explicit in {"CNY", "CAD", "USD"}:
+        return explicit
+    normalized = _normalize_text(cost_text)
+    if re.search(r"[*x×]\s*[45]\.\d", normalized) or "人民币" in normalized or "cny" in normalized:
+        return "CNY"
+    return "CAD"
+
+
 def _header_score(header: str) -> int:
     return 1 if _field_from_header(header) else 0
 
@@ -284,6 +302,178 @@ def _guess_numeric_column(
         if best is None or numeric_count > best[0]:
             best = (numeric_count, column)
     return best[1] if best and best[0] > 0 else None
+
+
+def _parse_headerless_inventory_rows(rows: list[tuple[Any, ...]]) -> list[SmartInventoryRow]:
+    data_rows = [row for row in rows if not _is_empty_row(row)]
+    if not data_rows:
+        return []
+
+    mapping = _guess_headerless_columns(data_rows)
+    product_column = mapping.get("product_name")
+    if product_column is None:
+        raise ValueError("没有识别到商品名列。支持表头：商品名、品名、product、title、name。")
+
+    excluded_notes_columns = {column for column in mapping.values() if column is not None}
+    parsed: list[SmartInventoryRow] = []
+    for row in data_rows:
+        product_name = _cell(row, product_column)
+        if not product_name or _looks_like_date(product_name) or _looks_like_sku(product_name):
+            continue
+        notes = _joined_notes(row, excluded_notes_columns)
+        cost_text = _cell(row, mapping.get("cost_price"))
+        parsed.append(
+            SmartInventoryRow(
+                product_name=product_name,
+                sku=_cell(row, mapping.get("sku")),
+                color=_cell(row, mapping.get("color")),
+                cost_price=_optional_money_text(cost_text),
+                cost_currency=_infer_cost_currency(cost_text, ""),
+                inventory=None,
+                target_price=_optional_money_text(_cell(row, mapping.get("target_price"))),
+                notes=notes,
+            )
+        )
+    return parsed
+
+
+def _guess_headerless_columns(rows: list[tuple[Any, ...]]) -> dict[str, int | None]:
+    max_cols = max((len(row) for row in rows), default=0)
+    sku_column = _guess_sku_column(rows, max_cols)
+    product_column = _guess_headerless_product_column(rows, max_cols, {sku_column} if sku_column is not None else set())
+
+    numeric_columns = [
+        column
+        for column in range(max_cols)
+        if column not in {sku_column, product_column}
+        and column > (product_column or -1)
+        and _headerless_numeric_score(rows, column) > 0
+    ]
+    cost_column = numeric_columns[0] if numeric_columns else None
+    target_column = numeric_columns[1] if len(numeric_columns) > 1 else None
+    color_column = _guess_color_column(rows, product_column, sku_column, cost_column)
+
+    return {
+        "product_name": product_column,
+        "sku": sku_column,
+        "color": color_column,
+        "cost_price": cost_column,
+        "target_price": target_column,
+    }
+
+
+def _guess_sku_column(rows: list[tuple[Any, ...]], max_cols: int) -> int | None:
+    best: tuple[int, int] | None = None
+    for column in range(max_cols):
+        score = sum(1 for row in rows if column < len(row) and _looks_like_sku(_cell_text(row[column])))
+        if best is None or score > best[0]:
+            best = (score, column)
+    return best[1] if best and best[0] > 0 else None
+
+
+def _guess_headerless_product_column(rows: list[tuple[Any, ...]], max_cols: int, used_columns: set[int]) -> int | None:
+    best: tuple[int, int] | None = None
+    for column in range(max_cols):
+        if column in used_columns:
+            continue
+        score = 0
+        for row in rows:
+            value = _cell_text(row[column]) if column < len(row) else ""
+            if not value or _looks_like_date(value) or _looks_like_sku(value) or _looks_numeric(value):
+                continue
+            score += _product_name_score(value)
+        if best is None or score > best[0]:
+            best = (score, column)
+    return best[1] if best and best[0] > 0 else None
+
+
+def _guess_color_column(
+    rows: list[tuple[Any, ...]],
+    product_column: int | None,
+    sku_column: int | None,
+    cost_column: int | None,
+) -> int | None:
+    if sku_column is not None and cost_column is not None and sku_column < cost_column:
+        candidates = list(range(sku_column + 1, cost_column))
+    elif product_column is not None and cost_column is not None and product_column < cost_column:
+        candidates = list(range(product_column + 1, cost_column))
+    else:
+        candidates = []
+    best: tuple[int, int] | None = None
+    for column in candidates:
+        score = 0
+        for row in rows:
+            value = _cell_text(row[column]) if column < len(row) else ""
+            if value and not _looks_like_sku(value) and not _looks_numeric(value):
+                score += 1
+        if best is None or score > best[0]:
+            best = (score, column)
+    return best[1] if best and best[0] > 0 else None
+
+
+def _headerless_numeric_score(rows: list[tuple[Any, ...]], column: int) -> int:
+    score = 0
+    for row in rows:
+        value = _cell_text(row[column]) if column < len(row) else ""
+        if not value or _looks_like_sku(value) or _looks_like_date(value):
+            continue
+        if _optional_money_text(value) is not None:
+            score += 1
+    return score
+
+
+def _joined_notes(row: tuple[Any, ...], excluded_columns: set[int]) -> str:
+    notes: list[str] = []
+    for index, value in enumerate(row):
+        text = _cell_text(value)
+        if not text or index in excluded_columns:
+            continue
+        if _looks_like_sku(text) or re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text.replace(",", "")):
+            continue
+        notes.append(text)
+    return " | ".join(notes)
+
+
+def _product_name_score(value: str) -> int:
+    normalized = _normalize_text(value)
+    product_terms = [
+        "arcteryx",
+        "始祖鸟",
+        "jacket",
+        "hoody",
+        "hoodie",
+        "shirt",
+        "pant",
+        "pants",
+        "vest",
+        "coat",
+        "fleece",
+        "pullover",
+        "crew",
+        "neck",
+        "shoe",
+        "gtx",
+        "atom",
+        "beta",
+        "cerium",
+        "gamma",
+        "kragg",
+        "rho",
+        "squamish",
+        "emblem",
+        "psiphon",
+        "clarkia",
+        "男",
+        "女",
+        "裤",
+        "衣",
+        "鞋",
+    ]
+    score = 1 if 3 <= len(value) <= 80 else 0
+    score += sum(3 for term in product_terms if term in normalized)
+    if any(term in normalized for term in ["库存", "更新", "折扣", "已做", "官网", "店内", "奥莱"]):
+        score -= 2
+    return max(score, 0)
 
 
 def _cell_text(value: Any) -> str:
@@ -331,6 +521,39 @@ def _optional_float_text(value: str) -> float | None:
         return None
 
 
+def _optional_money_text(value: str) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    cleaned = (
+        text.replace(",", "")
+        .replace("$", "")
+        .replace("¥", "")
+        .replace("￥", "")
+        .replace("（专属价）", "")
+        .replace("专属价", "")
+        .strip()
+    )
+    expression_match = re.match(r"^\s*(-?\d+(?:\.\d+)?(?:\s*[+\-*/]\s*-?\d+(?:\.\d+)?)+)", cleaned)
+    if expression_match:
+        return _safe_eval_money_expression(expression_match.group(1))
+    if re.search(r"(?:进价|成本|供货价)\s*[*x×]\s*\d", cleaned) and not re.match(r"^\s*-?\d", cleaned):
+        return None
+    return _optional_float_text(cleaned)
+
+
+def _safe_eval_money_expression(expression: str) -> float | None:
+    if not re.fullmatch(r"[\d.\s+\-*/]+", expression):
+        return None
+    try:
+        value = eval(expression, {"__builtins__": {}}, {})
+    except Exception:
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    return round(float(value), 2)
+
+
 def _optional_int_text(value: str) -> int | None:
     if _looks_like_date(value):
         return None
@@ -344,6 +567,10 @@ def _looks_like_date(value: str) -> bool:
         re.search(r"\b(?:19|20)\d{2}[-/.年]\d{1,2}(?:[-/.月]\d{1,2})?", text)
         or re.search(r"\b\d{1,2}[-/.]\d{1,2}[-/.](?:19|20)\d{2}\b", text)
     )
+
+
+def _looks_like_sku(value: str) -> bool:
+    return bool(re.search(r"\bX\d{6,}\b", str(value or "").strip(), re.IGNORECASE))
 
 
 def _csv_safe(value: str) -> str:

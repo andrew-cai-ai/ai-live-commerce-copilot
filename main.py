@@ -507,7 +507,9 @@ async def analyze(
         products = score_products(items, manual_overrides=manual_overrides)
         reports = generate_product_reports(products)
         audience_answers = answer_audience_questions(viewer_comments_text)
-        taobao_report = TaobaoLiveScoringService().build_report(pasted_json=taobao_json_text)
+        taobao_report = None
+        if items and all(item.source == "taobao_json" for item in items):
+            taobao_report = TaobaoLiveScoringService().build_report(pasted_json=taobao_json_text)
         report_html = render_report_page(
             products,
             reports,
