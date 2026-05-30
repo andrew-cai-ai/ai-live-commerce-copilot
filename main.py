@@ -33,6 +33,7 @@ from app.services.inventory_import import (
 )
 from app.services.live_data_connector import LiveDataConnector
 from app.services.live_memory import live_memory
+from app.services.live_product_pool import live_product_pool
 from app.services.live_training_data import live_training_data
 from app.services.report_history import get_report_path, list_reports, save_report
 from app.services.taobao_live_scoring import TaobaoLiveScoringService
@@ -291,6 +292,14 @@ async def live_product_playbook(request: Request, product_name: str = "", host_i
     }
 
 
+@app.get("/api/live/product-pool")
+async def live_product_pool_api(request: Request, workspace_id: str = "") -> dict[str, Any]:
+    denied = require_api_auth(request)
+    if denied:
+        return denied
+    return live_product_pool.get(workspace_id)
+
+
 @app.get("/api/model/training-dashboard")
 async def model_training_dashboard(request: Request) -> dict[str, Any]:
     denied = require_api_auth(request)
@@ -491,6 +500,7 @@ async def analyze(
     manual_research_text: str = Form(""),
     viewer_comments_text: str = Form(""),
     taobao_json_text: str = Form(""),
+    workspace_id: str = Form(""),
     inventory_excel: UploadFile | None = File(None),
 ) -> str:
     if not is_authenticated(request):
@@ -505,6 +515,7 @@ async def analyze(
         )
         manual_overrides = parse_manual_research_overrides(manual_research_text)
         products = score_products(items, manual_overrides=manual_overrides)
+        live_product_pool.save(products, workspace_id or request.query_params.get("workspace_id", ""))
         reports = generate_product_reports(products)
         audience_answers = answer_audience_questions(viewer_comments_text)
         taobao_report = None
@@ -729,6 +740,7 @@ def _render_form(
     <p><a href="/boss">经营总控看板</a> · <a href="/workspace/demo">客户交付页</a> · <a href="/live">打开主播控制台</a> · <a href="/live/prompter">AI 数据提词器</a> · <a href="/admin/live">直播监控后台</a> · <a href="/admin/model">导演模型训练</a> · <a href="/install">插件安装教程</a> · <a href="/reports">查看历史报告 / 导出 HTML</a> · <a href="/download/chrome-extension">下载 Chrome 插件包</a></p>
     {error_html}
     <form method="post" action="/analyze" enctype="multipart/form-data">
+      <input id="workspace_id" name="workspace_id" type="hidden" value="">
       <label for="inventory_text">库存商品</label>
         <textarea id="inventory_text" name="inventory_text" spellcheck="false" placeholder="{html.escape(EXAMPLE_INVENTORY_PLACEHOLDER)}">{html.escape(inventory_text)}</textarea>
       <div class="hint">可选格式：商品名, 成本, 库存, 目标售价, 可选成本币种。成本默认按 CAD；目标售价默认按 CNY。支持 CNY/CAD/USD，系统会统一折算到 CNY 参与利润和排序。</div>
@@ -757,6 +769,15 @@ def _render_form(
       <button type="submit">生成选品报告</button>
     </form>
   </main>
+  <script>
+    const workspaceParams = new URLSearchParams(location.search);
+    const workspaceId = workspaceParams.get("workspace_id") || localStorage.getItem("ai_live_workspace_id") || "";
+    if (workspaceId) {{
+      localStorage.setItem("ai_live_workspace_id", workspaceId);
+      const input = document.getElementById("workspace_id");
+      if (input) input.value = workspaceId;
+    }}
+  </script>
 </body>
 </html>"""
 
@@ -1027,6 +1048,7 @@ def _render_live_console() -> str:
   </main>
   <script>
     let products = [];
+    let serverProductPool = [];
     let liveMode = localStorage.getItem("ai_live_mode") || "real";
     let demoTick = 0;
     let latestDecision = {};
@@ -1076,7 +1098,9 @@ def _render_live_console() -> str:
       const input = document.getElementById("product-list");
       input.value = localStorage.getItem("ai_live_products") || "";
       input.addEventListener("input", () => {
+        serverProductPool = [];
         localStorage.setItem("ai_live_products", input.value);
+        localStorage.setItem("ai_live_products_source", "manual");
         products = productsFromInput();
         renderProductCards();
         refreshDecision();
@@ -1085,8 +1109,37 @@ def _render_live_console() -> str:
       products = productsFromInput();
       renderProductCards();
     }
+    function productPoolToText(list) {
+      return (list || []).map((product) => {
+        const parts = [product.name || product.product_name || ""];
+        if (product.target_selling_price) parts.push("¥" + Math.round(Number(product.target_selling_price)));
+        if (product.category) parts.push(product.category);
+        return parts.filter(Boolean).join(" | ");
+      }).filter(Boolean).join("\\n");
+    }
+    async function refreshProductPool() {
+      try {
+        const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
+        const response = await fetch("/api/live/product-pool" + query);
+        const data = await response.json();
+        const list = Array.isArray(data.products) ? data.products : [];
+        if (!list.length) return;
+        serverProductPool = list;
+        const input = document.getElementById("product-list");
+        const currentText = (input.value || "").trim();
+        if (!currentText || localStorage.getItem("ai_live_products_source") === "server") {
+          input.value = productPoolToText(list);
+          localStorage.setItem("ai_live_products", input.value);
+          localStorage.setItem("ai_live_products_source", "server");
+        }
+        products = productsFromInput();
+        renderProductCards();
+        updateChecklist();
+      } catch (_error) {}
+    }
     function productsFromInput() {
       const input = document.getElementById("product-list");
+      if (serverProductPool.length && localStorage.getItem("ai_live_products_source") !== "manual") return serverProductPool.slice(0, 50);
       return (input.value || "").split("\\n").map((line) => line.trim()).filter(Boolean).slice(0, 50).map((line, index) => {
         const parts = line.split("|").map((part) => part.trim());
         const name = parts[0] || line;
@@ -1413,7 +1466,7 @@ def _render_live_console() -> str:
       document.getElementById("connection-status").textContent = data.valid_live_metrics ? "真实数据已连接" : "等待有效直播数据";
       if (data.source === "demo") document.getElementById("connection-status").textContent = "演示模式运行中";
       document.getElementById("last-updated").textContent = snapshot.timestamp ? "更新时间：" + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "更新时间：--";
-      updateProductTimer((snapshot.current_product || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品"));
+      updateProductTimer((data.matched_current_product || snapshot.current_product || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品"));
       renderTimeline(data.timeline || []);
       renderQueue(data);
       renderPriorityComments();
@@ -1453,7 +1506,7 @@ def _render_live_console() -> str:
     }
     function renderQueue(data) {
       const node = document.getElementById("queue");
-      const current = (data.snapshot && data.snapshot.current_product) || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品";
+      const current = data.matched_current_product || (data.snapshot && data.snapshot.current_product) || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品";
       const next = data.recommended_next_product || "等待商品池";
       node.innerHTML = [["现在", current], ["下一件", next], ["动作", normalizeAction(data.current_action)], ["编号", data.action_code || "--"]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
     }
@@ -1575,10 +1628,12 @@ def _render_live_console() -> str:
     if (workspaceId) document.getElementById("prompter-link").href = "/live/prompter?workspace_id=" + encodeURIComponent(workspaceId);
     updateVoiceButtons();
     bindProductList();
+    refreshProductPool().then(() => refreshDecision());
     setMode(liveMode);
     refreshSessions(); refreshDecision();
     refreshBossIntervention();
     window.setInterval(refreshSessions, 10000);
+    window.setInterval(refreshProductPool, 60000);
     window.setInterval(refreshDecision, 5000);
     window.setInterval(refreshBossIntervention, 5000);
     window.setInterval(renderComments, 5000);
@@ -1718,6 +1773,7 @@ def _render_live_prompter() -> str:
   </main>
   <script>
     let currentProduct = "";
+    let liveProductPool = [];
     let productStartedAt = Date.now();
     let demoTick = 0;
     let latestDecision = {};
@@ -1735,10 +1791,29 @@ def _render_live_prompter() -> str:
       document.getElementById("host-id-label").textContent = next;
     }
     function productsFromStorage() {
+      if (liveProductPool.length) return liveProductPool.slice(0, 50);
       return (localStorage.getItem("ai_live_products") || "").split("\\n").map((line, index) => {
         const parts = line.trim().split("|").map((part) => part.trim());
         return parts[0] ? { name: parts[0], raw: line, score: 1 - index * 0.01, inventory: 1, profit_margin: 0 } : null;
       }).filter(Boolean).slice(0, 50);
+    }
+    async function refreshProductPool() {
+      try {
+        const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
+        const response = await fetch("/api/live/product-pool" + query);
+        const data = await response.json();
+        const list = Array.isArray(data.products) ? data.products : [];
+        if (list.length) {
+          liveProductPool = list;
+          localStorage.setItem("ai_live_products_source", "server");
+          localStorage.setItem("ai_live_products", list.map((product) => {
+            const parts = [product.name || product.product_name || ""];
+            if (product.target_selling_price) parts.push("¥" + Math.round(Number(product.target_selling_price)));
+            if (product.category) parts.push(product.category);
+            return parts.filter(Boolean).join(" | ");
+          }).filter(Boolean).join("\\n"));
+        }
+      } catch (_error) {}
     }
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
@@ -1925,7 +2000,7 @@ def _render_live_prompter() -> str:
       document.getElementById("ctr").textContent = fmtPercent(snapshot.ipv_uv_rate);
       document.getElementById("cvr").textContent = fmtPercent(snapshot.pay_byr_rate);
       document.getElementById("last-updated").textContent = snapshot.timestamp ? new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "--";
-      const product = snapshot.current_product || (productsFromStorage()[0] && productsFromStorage()[0].name) || "--";
+      const product = data.matched_current_product || snapshot.current_product || (productsFromStorage()[0] && productsFromStorage()[0].name) || "--";
       updateProduct(product);
       renderQueue(product, data.recommended_next_product, action);
       maybeSpeakDecision(data, action, sentence);
@@ -2029,8 +2104,9 @@ def _render_live_prompter() -> str:
     });
     setHostId(urlParams.get("host_id") || localStorage.getItem("ai_live_host_id") || "default");
     updateVoiceButton();
-    autoPickFreshHost().then(() => { refreshDecision(); refreshBossIntervention(); });
+    refreshProductPool().then(() => autoPickFreshHost()).then(() => { refreshDecision(); refreshBossIntervention(); });
     window.setInterval(refreshDecision, 5000);
+    window.setInterval(refreshProductPool, 60000);
     window.setInterval(refreshBossIntervention, 5000);
     window.setInterval(renderTimer, 1000);
   </script>

@@ -95,6 +95,8 @@ class LiveDecision:
     missing_metrics: list[str] = field(default_factory=list)
     timeline: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    matched_current_product: str = ""
+    current_product_match_confidence: float = 0.0
 
 
 @dataclass
@@ -104,4 +106,3 @@ class LiveSessionState:
     snapshots: list[LiveMetricSnapshot] = field(default_factory=list)
     action_history: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-

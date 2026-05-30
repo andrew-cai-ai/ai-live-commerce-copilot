@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 from typing import Any
 
@@ -192,6 +193,116 @@ def _count_sizing_comments(text: str) -> int:
     return len(re.findall(r"尺码|穿啥|多大|身高|体重|[1-2]\d{2}\s*[/ ]?\s*\d{2,3}", text))
 
 
+MODEL_TOKENS = {
+    "alpha",
+    "beta",
+    "atom",
+    "cerium",
+    "covert",
+    "delta",
+    "emblem",
+    "gamma",
+    "kragg",
+    "psiphon",
+    "rho",
+    "squamish",
+    "thorium",
+}
+MATCH_STOPWORDS = {
+    "arcteryx",
+    "arc",
+    "teryx",
+    "始祖鸟",
+    "极速",
+    "新",
+    "男",
+    "女",
+    "男士",
+    "女士",
+    "men",
+    "mens",
+    "women",
+    "womens",
+    "new",
+}
+
+
+def _match_inventory_product(current_product: str, products: list[dict[str, Any]]) -> tuple[str, float]:
+    query_tokens = set(_product_match_tokens(current_product))
+    if not query_tokens or not products:
+        return "", 0.0
+    query_models = query_tokens.intersection(MODEL_TOKENS)
+    best_name = ""
+    best_score = 0.0
+    for product in products:
+        name = _product_name(product)
+        candidate_tokens = set(_product_match_tokens(name))
+        if not name or not candidate_tokens:
+            continue
+        candidate_models = candidate_tokens.intersection(MODEL_TOKENS)
+        overlap = query_tokens.intersection(candidate_tokens)
+        if not overlap:
+            continue
+        overlap_weight = sum(_token_weight(token) for token in overlap)
+        denominator = max(1, min(
+            sum(_token_weight(token) for token in query_tokens),
+            sum(_token_weight(token) for token in candidate_tokens),
+        ))
+        score = overlap_weight / denominator
+        if query_models and not query_models.intersection(candidate_models):
+            score *= 0.35
+        if _compact_name(name) and _compact_name(name) in _compact_name(current_product):
+            score = max(score, 0.92)
+        if score > best_score:
+            best_score = score
+            best_name = name
+    if best_score >= 0.52:
+        return best_name, round(best_score, 3)
+    return "", round(best_score, 3)
+
+
+def _product_name(product: dict[str, Any]) -> str:
+    return re.sub(r"\s+", " ", str(product.get("name") or product.get("product_name") or "").strip())
+
+
+def _product_match_tokens(text: str) -> list[str]:
+    normalized = str(text or "").lower()
+    normalized = re.sub(r"x\d{4,}", " ", normalized)
+    raw_tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fa5]+", normalized)
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if token in MATCH_STOPWORDS or token.isdigit():
+            continue
+        if len(token) == 1 and token not in {"男", "女"}:
+            continue
+        tokens.append(token)
+    if "抓绒" in normalized:
+        tokens.append("fleece")
+    if "全拉链" in normalized or "拉链" in normalized:
+        tokens.extend(["full", "zip"])
+    if "连帽" in normalized or "帽衫" in normalized:
+        tokens.append("hoody")
+    if "羽绒" in normalized:
+        tokens.append("cerium")
+    if "马甲" in normalized or "背心" in normalized:
+        tokens.append("vest")
+    if "裤" in normalized:
+        tokens.append("pant")
+    return tokens
+
+
+def _compact_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9\u4e00-\u9fa5]+", "", str(value or "").lower())
+
+
+def _token_weight(token: str) -> int:
+    if token in MODEL_TOKENS:
+        return 4
+    if token in {"jacket", "hoody", "hoodie", "fleece", "shirt", "pant", "pants", "vest", "coat", "zip", "full", "neck", "pullover", "bottom"}:
+        return 2
+    return 1
+
+
 def _recommend_next_product(current_product: str, products: list[dict[str, Any]], action: str) -> str:
     if not products:
         return "暂无推荐商品"
@@ -204,11 +315,13 @@ def _recommend_next_product(current_product: str, products: list[dict[str, Any]]
         ),
         reverse=True,
     )
-    if action in {"switch product", "skip product"}:
+    if current_product:
         for product in sorted_products:
-            if product.get("name") != current_product:
-                return str(product.get("name") or "下一件商品")
-    return str(sorted_products[0].get("name") or "下一件商品")
+            if _product_name(product) != current_product:
+                return _product_name(product) or "下一件商品"
+    if action in {"switch product", "skip product"} and len(sorted_products) > 1:
+        return _product_name(sorted_products[1]) or "下一件商品"
+    return _product_name(sorted_products[0]) or "下一件商品"
 
 
 def _recommend_similar_product(winning_title: str, products: list[dict[str, Any]]) -> str:
@@ -218,7 +331,7 @@ def _recommend_similar_product(winning_title: str, products: list[dict[str, Any]
     best_name = ""
     best_overlap = 0
     for product in products:
-        name = str(product.get("name") or "")
+        name = _product_name(product)
         if name == winning_title:
             continue
         overlap = len(winning_tokens.intersection(_product_tokens(name)))
@@ -329,7 +442,7 @@ def _switch_recommendation(
     comment_drop = trend_60s.get("comment_uv") == "down"
     current_expected = max(snapshot.pay_amt_5min_d_live, snapshot.item_gmv * 0.3)
     recommended = _recommend_next_product(snapshot.current_product, products, "switch product")
-    recommended_product = next((item for item in products if item.get("name") == recommended), {})
+    recommended_product = next((item for item in products if _product_name(item) == recommended), {})
     recommended_expected = max(
         current_expected * 1.4 if viewer_drop or comment_drop else current_expected,
         float(recommended_product.get("score") or 0) * 1600,
@@ -426,15 +539,17 @@ def decide(
     action_code = "A007"
     current_action = "continue product"
     next_action = "继续讲当前商品，观察 30 秒趋势"
+    matched_current_product, match_confidence = _match_inventory_product(snapshot.current_product, products)
+    director_snapshot = replace(snapshot, current_product=matched_current_product) if matched_current_product else snapshot
     current_live_score = _current_live_score(snapshot)
     valid_live_metrics = _has_valid_live_metrics(snapshot)
     recent_winners = _recent_product_winners(snapshot.product_events)
     product_level_connected = _has_product_level_metrics(snapshot)
-    recommended_next_product = _recommend_next_product(snapshot.current_product, products, current_action)
-    product_health = _product_health(snapshot, trend_30s, trend_60s)
-    product_playbook = director_brief(snapshot.current_product)
+    recommended_next_product = _recommend_next_product(director_snapshot.current_product, products, current_action)
+    product_health = _product_health(director_snapshot, trend_30s, trend_60s)
+    product_playbook = director_brief(director_snapshot.current_product)
     comment_clusters = _comment_clusters(snapshot, snapshot.comment_text or _comment_text_from_snapshot(snapshot))
-    switch_recommendation = _switch_recommendation(snapshot, trend_60s, products)
+    switch_recommendation = _switch_recommendation(director_snapshot, trend_60s, products)
     livestream_mode = _livestream_mode(snapshot, trend_30s, current_live_score)
     learned_recommendations = _learned_recommendations(snapshot, comment_clusters)
 
@@ -567,7 +682,7 @@ def decide(
         next_action,
         action_code,
         current_action,
-        snapshot,
+        director_snapshot,
         product_playbook,
         comment_clusters,
     )
@@ -613,4 +728,6 @@ def decide(
         workspace_id=snapshot.workspace_id,
         missing_metrics=missing_metrics,
         warnings=decision_warnings,
+        matched_current_product=matched_current_product,
+        current_product_match_confidence=match_confidence,
     )
