@@ -998,7 +998,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         latestMetrics: null,
         hasValidPastedPayload: false,
         hasPastedTextareaContent: false,
-        payloadParseSuccess: false
+        payloadParseSuccess: false,
+        hasActiveConnectorSession: false,
+        activeConnectorHostId: ""
       };
 
       function initialLiveHostId() {
@@ -1050,18 +1052,24 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           const data = await response.json();
           const sessions = Array.isArray(data.sessions) ? data.sessions : [];
           const fresh = sessions.filter(function(item) {
-            return item && (item.age_seconds === null || item.age_seconds <= 45);
+            const source = String((item && item.source) || "");
+            const hasRecentAge = item && typeof item.age_seconds === "number" && item.age_seconds <= 60;
+            const hasRealSource = source === "chrome_extension" || source === "real_api";
+            return item && hasRecentAge && hasRealSource && item.valid_live_metrics !== false;
           }).slice(0, 5);
+          liveDirectorState.hasActiveConnectorSession = fresh.length > 0;
+          liveDirectorState.activeConnectorHostId = fresh.length ? (fresh[0].host_id || "") : "";
           if (!fresh.length) {
             node.textContent = "等待插件数据...";
             return;
           }
           const input = document.getElementById("live-host-id");
-          if (input && (!input.value.trim() || input.value.trim() === "default") && fresh.length === 1) {
+          if (input && (!input.value.trim() || input.value.trim() === "default" || !fresh.some(function(item) { return item.host_id === input.value.trim(); })) && fresh.length === 1) {
             input.value = fresh[0].host_id || "default";
             try {
               window.localStorage.setItem("ai_live_host_id", input.value);
             } catch (error) {}
+            simulateLiveMetrics();
           }
           node.innerHTML = fresh.map(function(item) {
             const age = item.age_seconds === null ? "--" : Math.round(item.age_seconds) + "s";
@@ -1912,6 +1920,18 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (manualMetrics && hasValidLiveMetrics(manualMetrics)) {
           updatePayloadDebug("manual", true, manualMetrics);
           renderLiveDecision(manualMetrics);
+          return;
+        }
+        if (liveDirectorState.hasActiveConnectorSession || liveHostId() !== "default") {
+          const waitingHost = liveDirectorState.activeConnectorHostId || liveHostId();
+          document.getElementById("live-status").textContent = "Waiting for real connector data · " + waitingHost + " · mock disabled";
+          updatePayloadDebug("connector", false, {
+            host_id: waitingHost,
+            online_uv: 0,
+            heat_score_raw: 0,
+            pay_amt: 0,
+            source: "connector"
+          });
           return;
         }
         const liveProduct = currentLiveProduct(hostProducts[hostProductIndex] || "当前商品");
