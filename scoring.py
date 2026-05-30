@@ -25,6 +25,7 @@ class InventoryItem:
     notes: str = ""
     source: str = "manual"
     inventory_unknown: bool = False
+    cost_unknown: bool = False
     cost_currency: str = "CAD"
     target_currency: str = "CNY"
 
@@ -43,6 +44,7 @@ class SellabilityScore:
 class ScoredProduct:
     product_name: str
     cost: float
+    cost_unknown: bool
     cost_price_original: float
     original_cost: float
     cost_currency: str
@@ -95,13 +97,15 @@ def parse_inventory(raw_text: str) -> list[InventoryItem]:
 
         name, cost, stock, target_price = row[:4]
         cost_currency = row[4].strip().upper() if len(row) == 5 and row[4].strip() else "CAD"
+        parsed_cost = _parse_optional_money(cost, line_number, "cost")
         items.append(
             InventoryItem(
                 product_name=name.strip(),
-                cost=_parse_optional_money(cost, line_number, "cost") or 0.0,
+                cost=parsed_cost or 0.0,
                 stock=_parse_optional_stock(stock, line_number) or 0,
                 target_selling_price=_parse_optional_money(target_price, line_number, "target selling price") or 0.0,
                 cost_currency=_validate_cost_currency(cost_currency, line_number),
+                cost_unknown=parsed_cost is None,
             )
         )
 
@@ -161,7 +165,7 @@ def score_products(
             raise ValueError(f"{item.product_name}: 库存不能为负数。")
 
         knowledge = get_product_knowledge(item.product_name)
-        cost_cny = _convert_cost_to_cny(item.cost, item.cost_currency, fx_rate.rate if fx_rate else 1.0)
+        cost_cny = 0.0 if item.cost_unknown else _convert_cost_to_cny(item.cost, item.cost_currency, fx_rate.rate if fx_rate else 1.0)
         target_selling_price = item.target_selling_price if item.target_selling_price > 0 else _default_target_price(cost_cny)
         market_research = market_research_service.research_product(
             product_name=item.product_name,
@@ -171,12 +175,12 @@ def score_products(
         if fx_rate and fx_rate.warning:
             market_research.warnings.append(fx_rate.warning)
         target_selling_price = _resolve_target_price(item, market_research, cost_cny)
-        profit = target_selling_price - cost_cny
-        profit_margin = profit / target_selling_price if target_selling_price > 0 else 0
+        profit = 0.0 if item.cost_unknown else target_selling_price - cost_cny
+        profit_margin = 0.0 if item.cost_unknown else profit / target_selling_price if target_selling_price > 0 else 0
         price_gap = (
             market_research.avg_market_price - target_selling_price
             if market_research.avg_market_price is not None
-            else profit
+            else 0.0 if item.cost_unknown else profit
         )
         raw_rows.append((item, cost_cny, target_selling_price, knowledge, market_research, profit, profit_margin, price_gap))
 
@@ -216,6 +220,7 @@ def score_products(
             ScoredProduct(
                 product_name=item.product_name,
                 cost=round(cost_cny, 2),
+                cost_unknown=item.cost_unknown,
                 cost_price_original=item.cost,
                 original_cost=item.cost,
                 cost_currency=item.cost_currency,

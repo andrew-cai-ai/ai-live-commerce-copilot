@@ -239,6 +239,7 @@ def _build_prompt(products: list[ScoredProduct]) -> str:
                 "rank": product.rank,
                 "score": round(product.score, 4),
                 "cost_cny": product.cost,
+                "cost_unknown": product.cost_unknown,
                 "cost_price_original": product.cost_price_original,
                 "original_cost": product.original_cost,
                 "cost_currency": product.cost_currency,
@@ -548,7 +549,7 @@ def _script_style_template(normalized_name: str) -> dict[str, str]:
 def _fallback_host_decision(score: float, product: ScoredProduct | None = None) -> str:
     if product and (
         product.profit_margin < 0
-        or product.stock <= 0
+        or (not product.inventory_unknown and product.stock <= 0)
         or (_real_evidence_count(product) == 0 and product.sellability.score < 0.35)
     ):
         return "Skip"
@@ -578,9 +579,9 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
       <div class="metrics">
         {_cost_metrics(product)}
         {_metric("目标售价", _money(product.target_selling_price, product.target_currency))}
-        {_metric("预估毛利", _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
+        {_metric("预估毛利", "待补成本" if product.cost_unknown else _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
-        {_metric("毛利率", f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
+        {_metric("毛利率", "待补成本" if product.cost_unknown else f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
         {_metric("库存", "unknown" if product.inventory_unknown else str(product.stock))}
         {_metric("平台热度", f"{product.popularity_score:.2f}")}
         {_metric("市场低价", _money_or_na(product.min_competitor_price, "CNY"))}
@@ -636,6 +637,8 @@ def _metric(label: str, value: str, class_name: str = "") -> str:
 
 
 def _cost_metrics(product: ScoredProduct) -> str:
+    if product.cost_unknown:
+        return _metric("成本", "待补成本")
     original = _source_currency_label(product.cost_price_original, product.cost_currency)
     converted = _money(product.cost, "CNY")
     rows = [_metric("成本", f"{original} (≈ {converted})")]
@@ -1204,29 +1207,63 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         return String(text || "").toLowerCase().replace(/[^a-z0-9\\u4e00-\\u9fa5]+/g, "");
       }
 
+      function productTokens(text) {
+        const normalized = String(text || "").toLowerCase();
+        const tokens = normalized.match(/[a-z0-9]+|[\\u4e00-\\u9fa5]{2,}/g) || [];
+        return tokens.filter(function(token) {
+          return token.length >= 3 && !/^x0+\\d+$/i.test(token);
+        });
+      }
+
+      function productMatchScore(itemName, productName) {
+        const normalizedItem = normalizeName(itemName);
+        const normalizedProduct = normalizeName(productName);
+        if (!normalizedItem || !normalizedProduct) {
+          return 0;
+        }
+        if (normalizedItem.includes(normalizedProduct) || normalizedProduct.includes(normalizedItem)) {
+          return 100;
+        }
+        const itemTokens = new Set(productTokens(itemName));
+        const productTerms = productTokens(productName);
+        let score = 0;
+        productTerms.forEach(function(token) {
+          if (itemTokens.has(token) || normalizedItem.includes(token)) {
+            score += token.length >= 5 ? 12 : 7;
+          }
+        });
+        return score;
+      }
+
       function currentLiveProduct(itemName) {
         if (!liveProducts.length) {
-          return { name: itemName || "当前商品", score: 0.5, inventory: 0, profit_margin: 0 };
+          return { name: itemName || "当前商品", score: 0.5, inventory: 0, profit_margin: 0, matched_from_inventory: false };
         }
-        const normalizedItem = normalizeName(itemName);
-        const matched = liveProducts.find(function(product) {
-          const normalizedProduct = normalizeName(product.name);
-          return normalizedItem && (normalizedItem.includes(normalizedProduct) || normalizedProduct.includes(normalizedItem));
+        let bestProduct = null;
+        let bestScore = 0;
+        liveProducts.forEach(function(product) {
+          const score = productMatchScore(itemName, product.name);
+          if (score > bestScore) {
+            bestScore = score;
+            bestProduct = product;
+          }
         });
-        if (matched) {
-          return matched;
+        if (bestProduct && bestScore >= 7) {
+          return Object.assign({}, bestProduct, { matched_from_inventory: true, raw_live_name: itemName || "" });
         }
         const fallback = liveProducts[hostProductIndex] || liveProducts[0] || {};
         if (itemName) {
-          return {
-            name: itemName,
+          return Object.assign({}, fallback, {
+            name: fallback.name || itemName,
             score: fallback.score || 0.5,
             inventory: fallback.inventory || 0,
             profit_margin: fallback.profit_margin || 0,
-            rank: fallback.rank || 0
-          };
+            rank: fallback.rank || 0,
+            matched_from_inventory: false,
+            raw_live_name: itemName
+          });
         }
-        return fallback;
+        return Object.assign({}, fallback, { matched_from_inventory: true });
       }
 
       function productContext(metrics) {
@@ -2109,7 +2146,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function renderProductHealth(health) {
         health = health || {};
-        document.getElementById("health-product-name").textContent = health.product || "--";
+        const matched = currentLiveProduct(health.product || "");
+        document.getElementById("health-product-name").textContent = matched.matched_from_inventory ? matched.name : (health.product || "--");
         setBar("health-heat", health.heat_score || 0);
         setBar("health-conversion", health.conversion_score || 0);
         setBar("health-engagement", health.engagement_score || 0);
@@ -2279,7 +2317,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(liveScore * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
-        document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
+        const displayProduct = currentLiveProduct(metrics.item_name);
+        document.getElementById("live-item-name").textContent = displayProduct.matched_from_inventory ? displayProduct.name : (metrics.item_name || "当前商品");
         document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = data.product_level_connected ? "--" : "商品级指标暂未接入";
         document.getElementById("director-current-action").textContent = decision.action;
@@ -2341,7 +2380,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
         document.getElementById("ai-live-decision").textContent = decision.decision;
-        document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
+        const displayProduct = currentLiveProduct(metrics.item_name);
+        document.getElementById("live-item-name").textContent = displayProduct.matched_from_inventory ? displayProduct.name : (metrics.item_name || "当前商品");
         document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
         document.getElementById("live-jiangjie-effect").textContent = metrics.jiangJieEffect ? Math.round(metrics.jiangJieEffect) : "--";
         document.getElementById("director-current-action").textContent = decision.action;
@@ -2476,9 +2516,10 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (hostProducts.length && (decision.decision === "Switch product" || decision.decision === "不做主推")) {
           hostProductIndex = Math.min(hostProductIndex + 1, hostProducts.length - 1);
         }
+        const displayProduct = currentLiveProduct(metrics.item_name);
         const currentProduct = (decision.decision === "Switch product" || decision.decision === "不做主推")
-          ? (hostProducts[hostProductIndex] || metrics.item_name || "等待商品")
-          : (metrics.item_name || hostProducts[hostProductIndex] || "等待商品");
+          ? (hostProducts[hostProductIndex] || displayProduct.name || "等待商品")
+          : (displayProduct.matched_from_inventory ? displayProduct.name : (metrics.item_name || hostProducts[hostProductIndex] || "等待商品"));
         document.getElementById("host-current-product").textContent = currentProduct;
         document.getElementById("host-viewer-count").textContent = metrics.viewer_count.toLocaleString();
         document.getElementById("host-ctr").textContent = formatPercent(metrics.ipv_uv_rate);

@@ -101,6 +101,7 @@ def smart_rows_to_inventory_items(rows: list[SmartInventoryRow]) -> list[Invento
             notes=row.notes,
             source="excel",
             inventory_unknown=row.inventory is None,
+            cost_unknown=row.cost_price is None,
             cost_currency=row.cost_currency,
         )
         for row in rows
@@ -154,6 +155,7 @@ def parse_taobao_inventory_json(raw_json: str) -> list[InventoryItem]:
             category=product.cat_name,
             status=product.target_product_status,
             source="taobao_json",
+            cost_unknown=product.price <= 0,
             cost_currency="CNY",
         )
         for product in products
@@ -342,15 +344,22 @@ def _guess_headerless_columns(rows: list[tuple[Any, ...]]) -> dict[str, int | No
     sku_column = _guess_sku_column(rows, max_cols)
     product_column = _guess_headerless_product_column(rows, max_cols, {sku_column} if sku_column is not None else set())
 
-    numeric_columns = [
+    cost_candidates = [
         column
         for column in range(max_cols)
         if column not in {sku_column, product_column}
         and column > (product_column or -1)
+        and _headerless_cost_score(rows, column) > 0
+    ]
+    cost_column = cost_candidates[0] if cost_candidates else None
+    numeric_columns = [
+        column
+        for column in range(max_cols)
+        if column not in {sku_column, product_column, cost_column}
+        and column > (cost_column if cost_column is not None else product_column or -1)
         and _headerless_numeric_score(rows, column) > 0
     ]
-    cost_column = numeric_columns[0] if numeric_columns else None
-    target_column = numeric_columns[1] if len(numeric_columns) > 1 else None
+    target_column = numeric_columns[0] if numeric_columns else None
     color_column = _guess_color_column(rows, product_column, sku_column, cost_column)
 
     return {
@@ -418,6 +427,19 @@ def _headerless_numeric_score(rows: list[tuple[Any, ...]], column: int) -> int:
         if not value or _looks_like_sku(value) or _looks_like_date(value):
             continue
         if _optional_money_text(value) is not None:
+            score += 1
+    return score
+
+
+def _headerless_cost_score(rows: list[tuple[Any, ...]], column: int) -> int:
+    score = 0
+    for row in rows:
+        value = _cell_text(row[column]) if column < len(row) else ""
+        if not value or _looks_like_sku(value) or _looks_like_date(value):
+            continue
+        if _optional_money_text(value) is not None:
+            score += 2
+        elif re.search(r"进价|成本|供货价", value):
             score += 1
     return score
 

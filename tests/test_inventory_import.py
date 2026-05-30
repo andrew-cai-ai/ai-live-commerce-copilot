@@ -5,6 +5,8 @@ import unittest
 from openpyxl import Workbook
 
 from app.services.inventory_import import build_inventory_items, parse_smart_inventory_file
+from report import _fallback_host_decision
+from scoring import score_products
 
 
 def _workbook_bytes(rows: list[tuple[object, ...]]) -> bytes:
@@ -96,6 +98,24 @@ class InventoryImportTests(unittest.TestCase):
         self.assertIsNone(rows[2].cost_price)
         self.assertEqual(rows[3].cost_price, 202.33)
         self.assertEqual(rows[3].cost_currency, "CAD")
+
+        items = build_inventory_items("", excel_bytes=excel_bytes, excel_filename="ashley.xlsx")
+        squamish = next(item for item in items if item.sku == "X000010276")
+        gamma = next(item for item in items if item.sku == "X000010481")
+        self.assertTrue(squamish.cost_unknown)
+        self.assertFalse(gamma.cost_unknown)
+
+    def test_unknown_cost_does_not_create_fake_profit_margin(self) -> None:
+        excel_bytes = _workbook_bytes([
+            (None, "Squamish Hoody\n男士", "X000010276", "sea salt", "店铺折扣，进价*0.7+20.33", 1299.0),
+        ])
+
+        product = score_products(build_inventory_items("", excel_bytes=excel_bytes, excel_filename="ashley.xlsx"))[0]
+
+        self.assertTrue(product.cost_unknown)
+        self.assertEqual(product.profit_margin, 0)
+        self.assertEqual(product.profit, 0)
+        self.assertNotEqual(_fallback_host_decision(product.score, product), "Skip")
 
     def test_inventory_text_or_excel_takes_priority_over_taobao_json(self) -> None:
         taobao_json = json.dumps({
