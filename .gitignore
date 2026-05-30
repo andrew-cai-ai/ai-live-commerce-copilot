@@ -12,6 +12,7 @@ data/fx_rate_cache.json
 data/live_memory.json
 data/live_director_training.jsonl
 data/live_knowledge_graph.json
+data/live_product_pool.json
 data/director_model_v0.json
 outputs/
 scripts/split_live_connector.py
