@@ -397,11 +397,11 @@ class LiveDataConnector:
         fresh_sessions = self._fresh_sessions()
         if host_id == "default" and len(fresh_sessions) == 1:
             active_host_id, active_session = fresh_sessions[0]
-            warnings.append(f"Using only active live room: {active_host_id}")
+            warnings.append(f"已自动连接唯一活跃直播间：{active_host_id}")
             data = _overlay_live_context(_unwrap_payload(active_session.latest_ingested_payload), payload)
             return data, "chrome_extension", active_host_id
         if host_id == "default" and len(fresh_sessions) > 1:
-            warnings.append("Multiple active live rooms detected. Set host_id/liveId to choose one.")
+            warnings.append("检测到多个活跃直播间，请选择对应 liveId。")
 
         if payload:
             normalized_payload = _normalize_ingested_payload(payload)
@@ -421,9 +421,9 @@ class LiveDataConnector:
                 return _unwrap_payload(normalized_payload), "real_api", resolved_host_id
             except Exception:
                 logger.exception("Live metrics API request failed for %s", self.api_url)
-                warnings.append("Live metrics API failed; using cached or empty metrics")
+                warnings.append("实时数据接口暂时不可用，正在使用缓存或等待新数据。")
 
-        warnings.append("No live metrics connector data found.")
+        warnings.append("暂未收到插件实时数据，请确认淘宝中控页和插件都已打开。")
         return {}, "no_connector", host_id
 
     def _build_snapshot(self, data: dict[str, Any], source: str, host_id: str) -> LiveMetricSnapshot:
@@ -536,5 +536,4 @@ class LiveDataConnector:
         missing_metrics: list[str],
     ) -> LiveDecision:
         return decide(snapshot, trend_30s, trend_60s, products, missing_metrics)
-
 

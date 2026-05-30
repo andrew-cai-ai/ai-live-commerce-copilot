@@ -2281,7 +2281,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("ai-live-decision").textContent = decision.decision;
         document.getElementById("live-item-name").textContent = metrics.item_name || "当前商品";
         document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
-        document.getElementById("live-jiangjie-effect").textContent = data.product_level_connected ? "--" : "Product-level metrics not connected yet.";
+        document.getElementById("live-jiangjie-effect").textContent = data.product_level_connected ? "--" : "商品级指标暂未接入";
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
         document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";

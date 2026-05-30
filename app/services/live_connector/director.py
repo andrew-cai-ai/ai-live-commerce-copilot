@@ -240,25 +240,25 @@ def _switch_recommendation(
         "switch_now": switch_now,
         "current_expected_gmv": round(current_expected),
         "recommended_expected_gmv": round(recommended_expected),
-        "recommendation": "Switch now" if switch_now else "Hold and monitor",
+        "recommendation": "现在切品" if switch_now else "先不切，继续观察",
     }
 
 
 def _comment_clusters(snapshot: LiveMetricSnapshot, comments: str) -> dict[str, Any]:
     counts = {
-        "Sizing questions": max(snapshot.sizing_comments, len(re.findall(r"尺码|穿啥|身高|体重|[1-2]\d{2}", comments))),
-        "Authenticity questions": max(snapshot.authenticity_comments, len(re.findall(r"真假|正品|吊牌|洗标|鉴定", comments))),
-        "Color questions": len(re.findall(r"黑色|白色|颜色|色差|有码", comments)),
-        "Price questions": len(re.findall(r"价格|贵|便宜|划算|值不值|多少钱", comments)),
+        "尺码问题": max(snapshot.sizing_comments, len(re.findall(r"尺码|穿啥|身高|体重|[1-2]\d{2}", comments))),
+        "正品问题": max(snapshot.authenticity_comments, len(re.findall(r"真假|正品|吊牌|洗标|鉴定", comments))),
+        "颜色库存": len(re.findall(r"黑色|白色|颜色|色差|有码", comments)),
+        "价格问题": len(re.findall(r"价格|贵|便宜|划算|值不值|多少钱", comments)),
     }
     total = sum(counts.values()) or 1
     percentages = {key: round(value / total * 100) for key, value in counts.items()}
     ordered = sorted(percentages.items(), key=lambda item: item[1], reverse=True)
     action_map = {
-        "Sizing questions": "Explain sizing",
-        "Authenticity questions": "Show authenticity tags",
-        "Color questions": "Show color options",
-        "Price questions": "Explain price/value",
+        "尺码问题": "先讲尺码",
+        "正品问题": "展示吊牌洗标",
+        "颜色库存": "展示颜色库存",
+        "价格问题": "解释价格价值",
     }
     return {
         "clusters": percentages,
