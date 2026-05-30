@@ -2067,7 +2067,7 @@ def _render_install_guide() -> str:
   <main>
     <div class="hero">
       <h1>Chrome 插件安装教程</h1>
-      <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.2</b>。插件只捕获淘宝直播中控页里的实时数据响应，不收集淘宝密码，不做登录自动化；主播可在插件里填写老板/门店绑定码。</p>
+      <p>给主播电脑安装一次即可。当前最新插件版本：<b>0.1.5</b>。插件只捕获淘宝直播中控/专业大屏里的实时数据响应，不收集淘宝密码，不做登录自动化；主播可在插件里填写老板/门店绑定码。</p>
       <a class="download" href="/download/chrome-extension">下载 Chrome 插件包</a>
       <p><a href="/live">打开主播控制台</a> · <a href="/live/prompter">打开 AI 数据提词器</a> · <a href="/">返回首页</a></p>
     </div>
@@ -2076,7 +2076,7 @@ def _render_install_guide() -> str:
       <section class="step"><div><h2>打开 Chrome 扩展程序页面</h2><p>在 Chrome 地址栏输入 <code>chrome://extensions</code>，右上角打开 Developer Mode / 开发者模式。</p></div></section>
       <section class="step"><div><h2>加载插件文件夹</h2><p>点击 <code>Load unpacked</code> / 加载已解压的扩展程序，选择刚才解压出来的插件文件夹。</p></div></section>
       <section class="step"><div><h2>填写老板/门店绑定码</h2><p>点击插件图标，在“老板/门店绑定码”里填老板给主播的代码，例如 <code>boss-a</code> 或 <code>store-01</code>，这样数据会自动归到对应工作区。</p></div></section>
-      <section class="step"><div><h2>打开淘宝直播中控</h2><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code> 的实时直播中控页面。</p></div></section>
+      <section class="step"><div><h2>打开淘宝直播中控或专业大屏</h2><p>主播登录自己的淘宝账号，优先打开 <code>liveplatform.taobao.com</code> 的实时直播中控；如果使用专业大屏，也可以打开 <code>market.m.taobao.com</code> 的直播专业大屏页面。</p></div></section>
       <section class="step"><div><h2>点击插件并检查 4 步状态</h2><p>插件弹窗里看到“捕获实时接口”和“发送到云端系统”完成后，回到主播控制台。</p></div></section>
       <section class="step"><div><h2>进入主播控制台</h2><p>打开 <a href="/live">/live</a>。如果只有一个活跃直播间，系统会自动连接；多人同时直播时，选择对应 Host / room ID。</p></div></section>
       <section class="step"><div><h2>给主播打开大字提词器</h2><p>开播时建议把 <a href="/live/prompter">/live/prompter</a> 放在主播旁边屏幕，只显示“现在做什么”和“下一句怎么说”。</p></div></section>
@@ -2161,7 +2161,7 @@ def _render_workspace_onboarding(workspace_id: str) -> str:
         <section class="step"><div><h3>下载 Chrome 插件包</h3><p>先下载并解压插件包，不要直接选择 zip。</p><a class="button" href="/download/chrome-extension">下载插件包</a></div></section>
         <section class="step"><div><h3>加载插件</h3><p>打开 <code>chrome://extensions</code>，开启开发者模式，点击 Load unpacked / 加载已解压的扩展程序。</p></div></section>
         <section class="step"><div><h3>填写绑定码</h3><p>点击插件图标，在“老板/门店绑定码”里填写 <code>{safe_workspace_id}</code>，然后保存。</p></div></section>
-        <section class="step"><div><h3>打开淘宝直播中控</h3><p>主播登录自己的淘宝账号，打开 <code>liveplatform.taobao.com</code>，进入实时直播中控页。</p></div></section>
+        <section class="step"><div><h3>打开淘宝直播中控或专业大屏</h3><p>主播登录自己的淘宝账号，优先打开 <code>liveplatform.taobao.com</code> 实时直播中控；如果当前使用专业大屏，也可以打开 <code>market.m.taobao.com</code> 的直播专业大屏页面。</p></div></section>
         <section class="step"><div><h3>确认连接</h3><p>插件显示“捕获实时接口”和“发送到云端系统”成功后，老板看板会出现该直播间。</p></div></section>
       </div>
     </section>

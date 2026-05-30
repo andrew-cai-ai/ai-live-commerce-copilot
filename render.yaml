@@ -21,7 +21,7 @@ services:
       - key: LIVE_INGEST_TOKEN
         sync: false
       - key: LATEST_EXTENSION_VERSION
-        value: "0.1.4"
+        value: "0.1.5"
       - key: MODEL_V0_MIN_CONFIDENCE
         value: "0.4"
       - key: APP_COOKIE_SECURE

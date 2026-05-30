@@ -54,6 +54,9 @@ function render(status) {
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");
+  const endpointWarning = status.lastEndpointFailure
+    || (Array.isArray(status.endpointFailures) && status.endpointFailures.length ? status.endpointFailures[0] : "");
+  setText("endpoint-warning", endpointWarning || "--", endpointWarning ? "warn" : "");
   setText("observed-apis", Array.isArray(status.observedApis) && status.observedApis.length ? status.observedApis.slice(0, 4).join(", ") : "--");
   setText("last-observed-api", status.lastObservedApi || "--", status.lastObservedApi ? "warn" : "");
   setText("active-tab", status.activeTabHost || "--", status.activeTabMatches ? "good" : status.activeTabHost ? "warn" : "");
@@ -69,13 +72,17 @@ function render(status) {
   const hint = document.getElementById("hint");
   const hasLiveCapture = status.capturedTargetApi || status.domFallbackCaptured;
   if (!status.contentScriptInjected) {
-    hint.textContent = "还没有注入页面。请确认当前页是 liveplatform.taobao.com，并刷新淘宝后台。";
+    hint.textContent = "还没有注入页面。请确认当前页是 liveplatform.taobao.com 直播中控或 market.m.taobao.com 专业大屏，并刷新页面。";
     return;
   }
   if (!hasLiveCapture) {
     hint.textContent = status.lastObservedApi
       ? "插件已注入，但还没抓到目标实时接口。已观察到其它接口：" + status.lastObservedApi + "。请截图发给开发者判断淘宝是否换接口。"
       : "插件已注入，但还没抓到目标 mtop 接口。请进入直播中控数据页，或刷新正在直播的数据页面。";
+    return;
+  }
+  if (status.lastSendSuccess && endpointWarning) {
+    hint.textContent = "已发送成功，但前面的接口失败过，当前已回落到：" + (status.lastEndpoint || "--") + "。如果你想用云端，请检查 API 地址和 Ingest Token。";
     return;
   }
   if (status.domFallbackCaptured && !status.capturedTargetApi && status.lastSendSuccess) {
@@ -171,7 +178,7 @@ function renderSteps(status) {
   setStep(
     "step-page",
     status.activeTabMatches ? "done" : "active",
-    status.activeTabMatches ? "已在淘宝/天猫直播相关页面" : "请切到 liveplatform.taobao.com 页面"
+    status.activeTabMatches ? "已在淘宝直播中控/专业大屏相关页面" : "请切到淘宝直播中控或专业大屏页面"
   );
   setStep(
     "step-inject",

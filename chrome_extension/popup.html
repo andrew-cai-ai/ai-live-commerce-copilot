@@ -150,7 +150,7 @@
   </head>
   <body>
     <h1>AI Live Copilot Connector</h1>
-    <div class="version">Debug build: 2026-05-29-v17 · Extension: 0.1.4 · Cloud: ai-live-commerce-copilot.onrender.com</div>
+    <div class="version">Debug build: 2026-05-29-v18 · Extension: 0.1.5 · Cloud: ai-live-commerce-copilot.onrender.com</div>
     <div class="config">
       <label for="workspace-id">老板/门店绑定码</label>
       <div class="config-row">
@@ -197,13 +197,14 @@
       <div class="row"><span>Metrics</span><b id="metric-keys">--</b></div>
       <div class="row"><span>Events</span><b id="event-count">--</b></div>
       <div class="row"><span>Endpoint</span><b id="endpoint">--</b></div>
+      <div class="row"><span>Endpoint warning</span><b id="endpoint-warning">--</b></div>
       <div class="row"><span>Observed APIs</span><b id="observed-apis">--</b></div>
       <div class="row"><span>Last observed</span><b id="last-observed-api">--</b></div>
       <div class="row"><span>Active tab</span><b id="active-tab">--</b></div>
       <div class="row"><span>Manual inject</span><b id="manual-inject">--</b></div>
       <div class="row"><span>Error</span><b id="error">--</b></div>
     </div>
-    <div class="hint" id="hint">打开 liveplatform.taobao.com 的直播中控页；默认先连本地 localhost:8000，可在上方填写云端 API 地址。</div>
+    <div class="hint" id="hint">打开 liveplatform.taobao.com 直播中控或 market.m.taobao.com 专业大屏；默认先连本地 localhost:8000，可在上方填写云端 API 地址。</div>
     <button id="clear-status">清空状态</button>
     <script src="popup.js"></script>
   </body>

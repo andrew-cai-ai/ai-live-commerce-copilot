@@ -101,6 +101,7 @@
     const config = await getConfig();
     const workspaceId = String(config.workspace_id || config.binding_code || "").trim();
     const ingestToken = String(config.ingest_token || "").trim();
+    const apiBaseUrl = String(config.api_base_url || "").trim();
     if (workspaceId) {
       payload.workspace_id = workspaceId;
       payload.binding_code = workspaceId;
@@ -114,10 +115,13 @@
       liveId: payload.liveId || "",
       metricKeys: Object.keys(payload.metrics || {}),
       payloadSections: payload.payload_sections || {},
-      eventCount: Array.isArray(payload.events) ? payload.events.length : 0
+      eventCount: Array.isArray(payload.events) ? payload.events.length : 0,
+      configuredApiBaseUrl: apiBaseUrl,
+      ingestTokenConfigured: Boolean(ingestToken)
     });
 
     let lastError = "";
+    const endpointFailures = [];
     const endpoints = ingestEndpoints(config);
     for (const endpoint of endpoints) {
       try {
@@ -134,6 +138,9 @@
             lastSentAt: now(),
             lastEndpoint: endpoint,
             lastHttpStatus: response.status,
+            endpointFailures,
+            lastEndpointFailure: endpointFailures[0] || "",
+            endpointFallbackUsed: endpointFailures.length > 0,
             lastError: ""
           });
           return;
@@ -143,14 +150,19 @@
         } else {
           lastError = `POST ${endpoint} returned HTTP ${response.status}`;
         }
+        endpointFailures.push(lastError);
       } catch (error) {
         lastError = `POST ${endpoint} failed: ${error.message}`;
+        endpointFailures.push(lastError);
       }
     }
 
     updateStatus({
       lastSendSuccess: false,
       lastHttpStatus: 0,
+      endpointFailures,
+      lastEndpointFailure: endpointFailures[0] || "",
+      endpointFallbackUsed: endpointFailures.length > 0,
       lastError: lastError || "Local app is not reachable."
     });
   });

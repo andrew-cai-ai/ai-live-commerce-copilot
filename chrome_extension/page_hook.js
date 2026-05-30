@@ -419,8 +419,14 @@
 
     if (payAmt > 0) metrics.pay_amt = payAmt;
     if (onlineUv > 0) metrics.online_uv = onlineUv;
-    if (productClicks > 0) metrics.pv = productClicks;
-    if (enterUv > 0) metrics.uv = enterUv;
+    if (productClicks > 0) {
+      metrics.pv = productClicks;
+      metrics.product_click_count = productClicks;
+    }
+    if (enterUv > 0) {
+      metrics.uv = enterUv;
+      metrics.enter_uv = enterUv;
+    }
     if (currentProduct) metrics.current_product = currentProduct;
 
     if (!Object.keys(metrics).some((key) => key !== "current_product" && metrics[key] > 0)) {

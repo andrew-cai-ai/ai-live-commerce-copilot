@@ -26,7 +26,7 @@ APP_PASSWORD=your-shared-login-password
 APP_SECRET=long-random-secret
 LIVE_INGEST_TOKEN=long-random-ingest-token
 SERPAPI_CACHE_TTL_SECONDS=86400
-LATEST_EXTENSION_VERSION=0.1.3
+LATEST_EXTENSION_VERSION=0.1.5
 ```
 
 `LIVE_INGEST_TOKEN` is **required in production**. Without it, `/api/live-ingest` accepts unauthenticated POST requests and fake live metrics can pollute director decisions and training data. After deploy, open the Chrome extension popup and enter the same token in **Ingest Token**.

@@ -33,9 +33,15 @@ Host workflow:
 3. Click the extension icon and set:
    - API 地址: `https://ai-live-commerce-copilot.onrender.com`
    - Ingest Token: the same value as `LIVE_INGEST_TOKEN`
-4. Open the Taobao live backend realtime data page while logged in.
+4. Open the Taobao live backend realtime data page while logged in. The connector supports both:
+   - `liveplatform.taobao.com` live control pages
+   - `market.m.taobao.com/app/mtb/live-professional-screen/...` professional screen pages
 5. Click the extension icon and confirm:
    `Content script = yes`, `Page hook = yes`, `Target API captured = yes` 或 `DOM fallback = yes`, `Sent to app = yes`.
+
+If `Target API captured = no` and `DOM fallback = yes`, Taobao did not expose the full `mtop...assistant.data.get` response on that page. The app will use visible room data such as成交额、在线、进入、点击, but heat / CTR / CVR / watch duration still require the real `totalStats` / `dataRegion` API.
+
+If `Endpoint` shows `localhost` even after setting the cloud API address, the cloud request failed and the connector fell back to local. Check `Endpoint warning`, then verify the cloud API address and `Ingest Token`.
 
 ## Local setup
 
@@ -99,7 +105,7 @@ The parser maps metrics only by exact `valueType`. For example, `uv` becomes tot
 
 Click the extension icon to see the connector status:
 
-- `Content script`: whether the extension injected into `liveplatform.taobao.com`
+- `Content script`: whether the extension injected into the Taobao live control or professional screen page
 - `Page hook`: whether response interception was installed
 - `Target API captured`: whether the target mtop API returned
 - `DOM fallback`: whether visible dashboard numbers were read from the page when Taobao did not expose the target API
@@ -107,7 +113,7 @@ Click the extension icon to see the connector status:
 - `Sent to app`: whether `POST /api/live-ingest` succeeded
 - `Last captured` / `Last sent`: timestamps for the latest successful steps
 
-If both `Target API captured` and `DOM fallback` are `no`, refresh or enter the Taobao live data console. If `Sent to app` is `no`, make sure the local FastAPI app is running on port `8000` or the cloud API address is set correctly.
+If both `Target API captured` and `DOM fallback` are `no`, refresh or enter the Taobao live data console/professional screen. If `Sent to app` is `no`, make sure the local FastAPI app is running on port `8000` or the cloud API address/token is set correctly.
 
 Product-level metrics are prepared in the backend schema. If Taobao does not return them yet, the Live Director will show:
 

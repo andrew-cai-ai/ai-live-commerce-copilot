@@ -24,8 +24,8 @@ from app.services.live_data_connector import (
 
 class LiveDataConnectorTests(unittest.TestCase):
     def test_extension_version_matches_manifest(self) -> None:
-        self.assertEqual(LATEST_EXTENSION_VERSION, "0.1.4")
-        self.assertFalse(_version_lt("0.1.4", LATEST_EXTENSION_VERSION))
+        self.assertEqual(LATEST_EXTENSION_VERSION, "0.1.5")
+        self.assertFalse(_version_lt("0.1.5", LATEST_EXTENSION_VERSION))
 
     def test_jsonp_payload_normalization(self) -> None:
         payload = 'mtopjsonpdc_lsad29({"data":{"online_uv":520}});'
