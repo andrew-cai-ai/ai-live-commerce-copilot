@@ -966,7 +966,7 @@ def _render_live_console() -> str:
           </div>
         </section>
         <section class="push-mode" id="push-mode">
-          🔥 Push Mode：少讲参数，强调价格、库存、颜色和尺码。
+          🔥 成交推进模式：少讲参数，强调价格、库存、颜色和尺码。
           <ul>
             <li>黑色/热门码先锁</li>
             <li>别拉长解释，直接承接成交势能</li>
@@ -992,14 +992,14 @@ def _render_live_console() -> str:
             <div class="operator-note">主播不用管这里。运营只在开播前连接房间、粘贴商品队列。</div>
             <div class="host-input" style="margin-top:10px;"><input id="host-id-input" placeholder="default 或 liveId"><button id="save-host">连接</button></div>
             <div class="rooms" id="active-rooms"></div>
-            <div class="small" id="last-updated" style="margin-top:8px;">Last updated: --</div>
+            <div class="small" id="last-updated" style="margin-top:8px;">更新时间：--</div>
             <input id="session-name" placeholder="场次名，例如：5月28晚场" style="margin-top:10px;">
             <input id="host-name" placeholder="主播，例如：Gigi" style="margin-top:8px;">
             <input id="target-gmv" placeholder="目标 GMV，例如：50000" style="margin-top:8px;">
             <button id="save-session-meta" type="button" style="margin-top:8px;">保存场次信息</button>
             <textarea class="comments" id="product-list" placeholder="每行一个商品；可用 | 分隔价格和卖点&#10;Kragg Shirt | ¥499 | 特价T恤，适合通勤&#10;Atom Jacket | ¥1709 | 日常保暖" style="margin-top:10px;"></textarea>
             <div class="product-cards" id="product-cards"></div>
-            <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>Now</span><b>等待商品池</b></div></div>
+            <div class="queue" id="queue" style="margin-top:10px;"><div class="queue-item"><span>现在</span><b>等待商品池</b></div></div>
           </div>
         </details>
         <details class="panel">
@@ -1114,8 +1114,9 @@ def _render_live_console() -> str:
       const text = String(action || "");
       if (text.includes("No valid")) return "等待真实数据";
       if (text.includes("数据不完整")) return "等待补齐数据";
+      if (text.toLowerCase().includes("light push") || text.includes("轻推")) return "继续讲，轻推成交";
       if (text.includes("switch")) return "切换商品";
-      if (text.includes("push")) return "加速逼单";
+      if (text.includes("push")) return "加速成交";
       if (text.includes("value")) return "解释价格";
       if (text.includes("sizing")) return "讲尺码";
       if (text.includes("authenticity")) return "展示正品细节";
@@ -1134,10 +1135,28 @@ def _render_live_console() -> str:
       if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
       return mode || "实时导演模式";
     }
+    function localizeReason(text) {
+      return String(text || "")
+        .replace(/missing:/gi, "缺失：")
+        .replace(/totalStats\\.heat_score/g, "热度")
+        .replace(/totalStats\\.ipv_uv_rate/g, "CTR")
+        .replace(/totalStats\\.pay_byr_rate/g, "CVR")
+        .replace(/totalStats/g, "完整实时指标")
+        .replace(/demo data/gi, "演示数据")
+        .replace(/CTR up/gi, "CTR 上升")
+        .replace(/comments active/gi, "评论活跃");
+    }
+    function localizeInstruction(text) {
+      return String(text || "")
+        .replace(/totalStats\\s*\\/\\s*插件补齐/g, "完整实时指标 / 插件补齐")
+        .replace(/totalStats/g, "完整实时指标")
+        .replace(/等待\s+完整实时指标/g, "等待完整实时指标");
+    }
     function directorPlan(action, nextProduct) {
       const text = String(action || "").toLowerCase();
       if (text.includes("switch")) return ["收口当前款", nextProduct ? "切到：" + nextProduct : "切到下一件", "别继续讲参数"];
-      if (text.includes("push")) return ["加速逼单", "强调尺码和库存", "别拉长解释"];
+      if (text.includes("light push")) return ["继续讲，轻推成交", "讲价格/尺码/使用场景", "别猛逼单"];
+      if (text.includes("push")) return ["加速成交", "强调尺码和库存", "别拉长解释"];
       if (text.includes("value") || text.includes("price")) return ["解释值不值", "讲通勤/高频场景", "别只报价格"];
       if (text.includes("sizing")) return ["回答尺码", "让观众报身高体重", "别跳过尺码问题"];
       if (text.includes("authenticity")) return ["展示吊牌洗标", "镜头拉近细节", "别空口保证"];
@@ -1214,6 +1233,7 @@ def _render_live_console() -> str:
       if (text.includes("value")) return fallback || "别光看价格，平时通勤能穿，买回去不会吃灰。";
       if (text.includes("sizing")) return fallback || "175/70 正常 M，里面加卫衣建议 L。";
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
+      if (text.includes("light push")) return fallback || "这件先不猛催，继续讲尺码和日常场景。";
       if (text.includes("push")) return fallback || "现在已经有人在下单了，尺码合适的先锁。";
       return fallback || "宝子们看一下，这件现在数据还不错，先继续讲 30 秒。";
     }
@@ -1356,9 +1376,9 @@ def _render_live_console() -> str:
       document.getElementById("director-mode").textContent = directorModeLabel(data.livestream_mode);
       document.getElementById("action-code-pill").textContent = data.action_code || "--";
       document.getElementById("current-action").textContent = action;
-      const sentence = nextSentence(data.current_action, data.next_action);
+      const sentence = localizeInstruction(nextSentence(data.current_action, data.next_action));
       document.getElementById("next-sentence").textContent = sentence;
-      document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "--";
+      document.getElementById("reason").textContent = (data.reason || []).slice(0, 3).map(localizeReason).join(" / ") || "--";
       const warningsNode = document.getElementById("director-warnings");
       const warnings = Array.isArray(data.warnings) ? data.warnings : [];
       if (warningsNode) {
@@ -1392,7 +1412,7 @@ def _render_live_console() -> str:
       document.getElementById("watch-time").textContent = snapshot.stay_time_pu ? Math.round(snapshot.stay_time_pu) + "s" : "--";
       document.getElementById("connection-status").textContent = data.valid_live_metrics ? "真实数据已连接" : "等待有效直播数据";
       if (data.source === "demo") document.getElementById("connection-status").textContent = "演示模式运行中";
-      document.getElementById("last-updated").textContent = snapshot.timestamp ? "Last updated: " + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "Last updated: --";
+      document.getElementById("last-updated").textContent = snapshot.timestamp ? "更新时间：" + new Date(snapshot.timestamp * 1000).toLocaleTimeString("zh-CN", { hour12: false }) : "更新时间：--";
       updateProductTimer((snapshot.current_product || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品"));
       renderTimeline(data.timeline || []);
       renderQueue(data);
@@ -1428,14 +1448,14 @@ def _render_live_console() -> str:
         const cls = item.event_type === "danger" ? " danger" : item.event_type === "warning" ? " warn" : "";
         const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
         const code = item.action_code ? "[" + item.action_code + "] " : "";
-        return '<div class="timeline-item' + cls + '"><b>' + time + ' · ' + code + normalizeAction(item.decision) + '</b><div class="small">' + escapeHtml((item.reason || []).join(" / ")) + '</div><div>' + escapeHtml(nextSentence(item.decision, item.next_action)) + '</div></div>';
+        return '<div class="timeline-item' + cls + '"><b>' + time + ' · ' + code + normalizeAction(item.decision) + '</b><div class="small">' + escapeHtml((item.reason || []).map(localizeReason).join(" / ")) + '</div><div>' + escapeHtml(nextSentence(item.decision, item.next_action)) + '</div></div>';
       }).join("");
     }
     function renderQueue(data) {
       const node = document.getElementById("queue");
       const current = (data.snapshot && data.snapshot.current_product) || (productsFromInput()[0] && productsFromInput()[0].name) || "当前商品";
       const next = data.recommended_next_product || "等待商品池";
-      node.innerHTML = [["Now", current], ["Next", next], ["Action", normalizeAction(data.current_action)], ["Code", data.action_code || "--"]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
+      node.innerHTML = [["现在", current], ["下一件", next], ["动作", normalizeAction(data.current_action)], ["编号", data.action_code || "--"]].map((item) => '<div class="queue-item"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
     }
     function answerComment(text) {
       if (/175|170|180|尺码|多大|kg|斤/.test(text)) return "175/70 正常 M，里面加卫衣建议 L。";
@@ -1689,7 +1709,7 @@ def _render_live_prompter() -> str:
         <section class="panel">
           <span class="label">推荐队列</span>
           <div class="queue" id="queue">
-            <div class="queue-row"><span>Now</span><b>等待商品池</b></div>
+            <div class="queue-row"><span>现在</span><b>等待商品池</b></div>
           </div>
           <div class="tiny" style="margin-top:10px;">商品队列从主播控制台同步。没有商品池时，系统只做直播间级别判断。</div>
         </section>
@@ -1728,7 +1748,8 @@ def _render_live_prompter() -> str:
       const text = String(action || "").toLowerCase();
       if (text.includes("no valid") || text.includes("数据不完整")) return "等待数据";
       if (text.includes("switch")) return "切换商品";
-      if (text.includes("push")) return "加速逼单";
+      if (text.includes("light push") || text.includes("轻推")) return "继续讲，轻推成交";
+      if (text.includes("push")) return "加速成交";
       if (text.includes("value") || text.includes("price")) return "解释价格";
       if (text.includes("sizing")) return "讲尺码";
       if (text.includes("authenticity")) return "展示正品细节";
@@ -1747,6 +1768,23 @@ def _render_live_prompter() -> str:
       if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
       return mode || "实时导演模式";
     }
+    function localizeReason(text) {
+      return String(text || "")
+        .replace(/missing:/gi, "缺失：")
+        .replace(/totalStats\\.heat_score/g, "热度")
+        .replace(/totalStats\\.ipv_uv_rate/g, "CTR")
+        .replace(/totalStats\\.pay_byr_rate/g, "CVR")
+        .replace(/totalStats/g, "完整实时指标")
+        .replace(/demo data/gi, "演示数据")
+        .replace(/CTR up/gi, "CTR 上升")
+        .replace(/comments active/gi, "评论活跃");
+    }
+    function localizeInstruction(text) {
+      return String(text || "")
+        .replace(/totalStats\\s*\\/\\s*插件补齐/g, "完整实时指标 / 插件补齐")
+        .replace(/totalStats/g, "完整实时指标")
+        .replace(/等待\s+完整实时指标/g, "等待完整实时指标");
+    }
     function actionTone(action) {
       const text = String(action || "").toLowerCase();
       if (text.includes("switch") || text.includes("no valid") || text.includes("等待")) return "danger";
@@ -1760,6 +1798,7 @@ def _render_live_prompter() -> str:
       if (text.includes("value") || text.includes("price")) return "别光看价格，平时通勤能穿，买回去不会吃灰。";
       if (text.includes("sizing")) return "175/70 正常 M，里面加卫衣建议 L。";
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
+      if (text.includes("light push")) return fallback || "这件先不猛催，继续讲尺码和日常场景。";
       if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
       return fallback || "宝子们看一下，这件再讲 30 秒，看数据能不能继续顶上去。";
     }
@@ -1874,9 +1913,9 @@ def _render_live_prompter() -> str:
       const tone = actionTone(rawAction || action);
       if (tone === "warn") actionNode.classList.add("warn");
       if (tone === "danger") actionNode.classList.add("danger");
-      const sentence = sentenceFor(rawAction, data.next_action);
+      const sentence = localizeInstruction(sentenceFor(rawAction, data.next_action));
       document.getElementById("prompter-sentence").textContent = sentence;
-      document.getElementById("prompter-reason").textContent = (data.reason || []).slice(0, 3).join(" / ") || "等待更多趋势数据。";
+      document.getElementById("prompter-reason").textContent = (data.reason || []).slice(0, 3).map(localizeReason).join(" / ") || "等待更多趋势数据。";
       document.getElementById("source-pill").textContent = data.valid_live_metrics ? "实时数据已连接" : "等待有效直播数据";
       if (data.source === "demo") document.getElementById("source-pill").textContent = "演示模式";
       document.getElementById("viewer-count").textContent = fmtNumber(snapshot.total_live_viewers || snapshot.uv);
@@ -1906,7 +1945,7 @@ def _render_live_prompter() -> str:
     }
     function renderQueue(current, next, action) {
       const node = document.getElementById("queue");
-      const rows = [["Now", current || "--"], ["Next", next || "等待推荐"], ["Action", action || "--"], ["Code", latestDecision.action_code || "--"]];
+      const rows = [["现在", current || "--"], ["下一件", next || "等待推荐"], ["动作", action || "--"], ["编号", latestDecision.action_code || "--"]];
       node.innerHTML = rows.map((row) => '<div class="queue-row"><span>' + row[0] + '</span><b>' + escapeHtml(row[1]) + '</b></div>').join("");
     }
     async function copyNextSentence() {
@@ -2219,7 +2258,7 @@ def _render_admin_live() -> str:
       document.getElementById("active-count").textContent = fmtNumber(fresh.length);
       document.getElementById("valid-count").textContent = fmtNumber(fresh.filter((item) => item.valid_live_metrics).length);
       document.getElementById("total-gmv").textContent = fmtMoney(fresh.reduce((sum, item) => sum + Number(item.pay_amt || 0), 0));
-      document.getElementById("latest-update").textContent = fresh.length ? ageText(fresh[0].age_seconds) + " ago" : "--";
+      document.getElementById("latest-update").textContent = fresh.length ? ageText(fresh[0].age_seconds) + "前" : "--";
       const node = document.getElementById("rooms");
       if (!sessions.length) {
         node.innerHTML = '<div class="empty">暂无直播间数据。让主播打开淘宝直播中控页并启用 Chrome 插件。</div>';
@@ -2246,7 +2285,7 @@ def _render_admin_live() -> str:
           ["Live ID", session.live_id || "--"]
         ].map((item) => '<div class="metric"><span>' + item[0] + '</span><b>' + escapeHtml(item[1]) + '</b></div>').join("");
         return '<article class="room">'
-          + '<div class="room-head"><div><h2>' + escapeHtml(session.display_name || session.host_id || "default") + '</h2><div class="small">Host ID: ' + escapeHtml(session.host_id || "default") + ' · Last updated: ' + ageText(session.age_seconds) + ' ago</div></div>' + statusPill(session) + '</div>'
+          + '<div class="room-head"><div><h2>' + escapeHtml(session.display_name || session.host_id || "default") + '</h2><div class="small">主播/直播间 ID：' + escapeHtml(session.host_id || "default") + ' · 更新时间：' + ageText(session.age_seconds) + '前</div></div>' + statusPill(session) + '</div>'
           + '<div class="metrics">' + metrics + '</div>'
           + '<div class="actions"><a class="button" href="' + liveUrl + '">打开这个直播间</a><a class="button" href="' + detailUrl + '">查看趋势/导出</a></div>'
           + '</article>';
@@ -2409,7 +2448,7 @@ def _render_model_readiness_dashboard() -> str:
       const data = await response.json();
       document.getElementById("toast").textContent = data.status === "trained"
         ? "训练完成，准确率 " + fmtPercent(data.accuracy)
-        : "训练未执行：" + (data.status || "unknown");
+        : "训练未执行：" + (data.status || "未知");
       refresh();
     }
     document.getElementById("refresh").addEventListener("click", refresh);
@@ -2634,7 +2673,7 @@ def _render_admin_live_detail(host_id: str) -> str:
     <header>
       <div>
         <h1>直播间趋势</h1>
-        <div class="small">Host ID: <b id="host-id">{safe_host_id}</b></div>
+        <div class="small">主播/直播间 ID：<b id="host-id">{safe_host_id}</b></div>
       </div>
       <div><a href="/live?host_id={safe_host_id}">打开主播控制台</a> · <a href="/admin/live">返回监控后台</a> · <a href="/admin/live/{safe_host_id}/export.csv">导出 CSV</a></div>
     </header>
@@ -2839,7 +2878,7 @@ def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> st
 
 def _display_optional(value: object) -> str:
     if value is None or value == "":
-        return "unknown"
+        return "未知"
     return html.escape(str(value))
 
 

@@ -582,7 +582,7 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         {_metric("预估毛利", "待补成本" if product.cost_unknown else _money(product.profit, "CNY"), "negative" if product.profit < 0 else "")}
         {_metric("价格优势", _money(product.price_gap, "CNY"), "negative" if product.price_gap < 0 else "")}
         {_metric("毛利率", "待补成本" if product.cost_unknown else f"{product.profit_margin:.1%}", "negative" if product.profit_margin < 0 else "")}
-        {_metric("库存", "unknown" if product.inventory_unknown else str(product.stock))}
+        {_metric("库存", "待补库存" if product.inventory_unknown else str(product.stock))}
         {_metric("平台热度", f"{product.popularity_score:.2f}")}
         {_metric("市场低价", _money_or_na(product.min_competitor_price, "CNY"))}
         {_metric("市场均价", _money_or_na(product.avg_competitor_price, "CNY"))}
@@ -593,19 +593,19 @@ def _render_product_card(product: ScoredProduct, report: dict[str, Any]) -> str:
         {_metric("日常穿着", f"{product.sellability.daily_wear_suitability:.2f}")}
         {_metric("转化难度", f"{product.sellability.conversion_difficulty:.2f}")}
         {_metric("竞争分", f"{product.competition_score:.2f}")}
-        {_metric("GMV潜力", product.gmv_level)}
+        {_metric("GMV潜力", _gmv_label(product.gmv_level))}
       </div>
       {_fx_warning(product)}
-      <div class="evidence"><b>Real data vs AI inferred data</b>{_real_vs_inferred(product)}</div>
+      <div class="evidence"><b>真实数据 vs AI 推断</b>{_real_vs_inferred(product)}</div>
       <div class="section">
-        <h3>Why AI ranked this product</h3>
+        <h3>AI 为什么这样排序</h3>
         {_list(product.ranking_explanation)}
       </div>
-      {_collapsed_section("Market Price Evidence", _market_price_table(product))}
-      {_collapsed_section("Social Heat Signals", _social_heat_signals(product))}
-      {_collapsed_section("AI Livestream Script", _ai_script(report))}
+      {_collapsed_section("市场价格证据", _market_price_table(product))}
+      {_collapsed_section("社媒热度证据", _social_heat_signals(product))}
+      {_collapsed_section("AI 直播话术", _ai_script(report))}
       <div class="section">
-        <h3>Host Decision</h3>
+        <h3>主播决策</h3>
         <span class="decision">{html.escape(report["host_decision"])}（{_decision_label(report["host_decision"])}）</span>
       </div>
       {_evidence_summary(product)}
@@ -657,14 +657,14 @@ def _cost_metrics(product: ScoredProduct) -> str:
 def _fx_warning(product: ScoredProduct) -> str:
     if product.cost_currency.upper() == "CNY" or not product.fx_warning:
         return ""
-    return f'<div class="warning"><b>汇率提示</b><p>{html.escape(product.fx_warning)}</p></div>'
+    return f'<div class="warning"><b>汇率提示</b><p>{html.escape(_localize_report_text(product.fx_warning))}</p></div>'
 
 
 def _fx_source_label(product: ScoredProduct) -> str:
     labels = {
         "live_fx_api": "实时 FX API",
         "cached_fx_rate": "缓存汇率",
-        "manual_fallback": "手动 fallback",
+        "manual_fallback": "手动兜底",
     }
     timestamp = _format_timestamp(product.fx_timestamp)
     return f"{labels.get(product.fx_source, product.fx_source)} · {timestamp}"
@@ -672,13 +672,13 @@ def _fx_source_label(product: ScoredProduct) -> str:
 
 def _format_timestamp(timestamp: float) -> str:
     if not timestamp:
-        return "N/A"
+        return "--"
     try:
         from datetime import datetime
 
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
     except Exception:
-        return "N/A"
+        return "--"
 
 
 def _real_evidence_count(product: ScoredProduct) -> int:
@@ -703,7 +703,7 @@ def _render_taobao_top_products(taobao_report: TaobaoTopProductsReport | None) -
     if not taobao_report.scores:
         return f"""
       <section class="order-panel">
-        <h2>Today's Top Products</h2>
+        <h2>今日主推商品</h2>
         {warning_html}
         <p class="empty">暂未拿到淘宝商品池数据。请在首页粘贴 Chrome DevTools 复制出来的淘宝 JSON；留空时才会尝试可选 API URL 模式。</p>
       </section>"""
@@ -713,7 +713,7 @@ def _render_taobao_top_products(taobao_report: TaobaoTopProductsReport | None) -
         <tr>
           <td>#{index}</td>
           <td>{html.escape(score.product.source_product_title)}</td>
-          <td>{html.escape(score.product.cat_name or "N/A")}</td>
+          <td>{html.escape(score.product.cat_name or "未知")}</td>
           <td>{_money(score.product.price, "CNY")}</td>
           <td>{_money(score.advised_price, "CNY")}</td>
           <td>{score.product.sku_number}</td>
@@ -744,30 +744,30 @@ def _render_taobao_top_products(taobao_report: TaobaoTopProductsReport | None) -
 
     return f"""
       <section class="order-panel">
-        <h2>Today's Top Products</h2>
+        <h2>今日主推商品</h2>
         {warning_html}
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Rank</th>
-                <th>Product title</th>
-                <th>Category</th>
-                <th>Cost price</th>
-                <th>Suggested sale price</th>
-                <th>SKU count</th>
-                <th>Profit margin</th>
-                <th>Inventory score</th>
-                <th>Sellability</th>
-                <th>Final score</th>
+                <th>排名</th>
+                <th>商品标题</th>
+                <th>品类</th>
+                <th>成本价</th>
+                <th>建议售价</th>
+                <th>SKU 数</th>
+                <th>毛利率</th>
+                <th>库存分</th>
+                <th>直播好卖度</th>
+                <th>综合分</th>
               </tr>
             </thead>
             <tbody>{rows}</tbody>
           </table>
         </div>
-        <h3>Reason</h3>
+        <h3>推荐原因</h3>
         <div class="script-grid">{reasons}</div>
-        <h3>Suggested livestream order</h3>
+        <h3>建议直播顺序</h3>
         <div class="order-grid">{order}</div>
       </section>"""
 
@@ -776,144 +776,144 @@ def _render_live_mode_dashboard() -> str:
     return """
       <section class="live-panel" id="live-mode-dashboard">
         <div class="live-head">
-          <h2>Live Director Mode</h2>
-          <span class="live-status" id="live-status">Mock livestream simulator · updates every 5s</span>
+          <h2>AI 直播导演</h2>
+          <span class="live-status" id="live-status">演示数据模拟器 · 每 5 秒更新</span>
         </div>
         <div class="live-input" style="margin-bottom:12px;">
-          <b>Live room / host ID</b>
+          <b>直播间 / 主播 ID</b>
           <input id="live-host-id" placeholder="default 或 liveId，例如 566949664239">
         </div>
         <div class="director-priority">
           <div class="director-now">
-            <span>Current action</span>
+            <span>现在做什么</span>
             <strong id="director-current-action">等待数据...</strong>
-            <span>Next sentence</span>
+            <span>下一句直接念</span>
             <div class="director-sentence" id="director-next-sentence">--</div>
-            <div style="margin-top:10px;"><span>Reason</span><b id="director-reason">--</b></div>
+            <div style="margin-top:10px;"><span>原因</span><b id="director-reason">--</b></div>
           </div>
           <div class="director-side">
             <div class="decision-card">
-              <span>Current mode</span>
+              <span>当前模式</span>
               <div class="mode-pill" id="director-mode">--</div>
-              <div><b>Recommended next product</b>: <span id="director-next-product">--</span></div>
-              <div><b>Confidence</b>: <span id="director-confidence">--</span></div>
+              <div><b>推荐下一件</b>：<span id="director-next-product">--</span></div>
+              <div><b>置信度</b>：<span id="director-confidence">--</span></div>
             </div>
             <div class="decision-card">
-              <span>Switch recommendation</span>
+              <span>切品建议</span>
               <strong id="switch-recommendation">--</strong>
-              <div>Current expected GMV: <b id="current-expected-gmv">--</b></div>
-              <div>Recommended expected GMV: <b id="recommended-expected-gmv">--</b></div>
+              <div>当前预计 GMV：<b id="current-expected-gmv">--</b></div>
+              <div>推荐商品预计 GMV：<b id="recommended-expected-gmv">--</b></div>
             </div>
           </div>
         </div>
         <div class="decision-card">
-          <span>Product Health Dashboard</span>
+          <span>商品健康度</span>
           <strong id="health-product-name">--</strong>
           <div class="health-grid">
-            <div class="health-card"><span>Heat</span><b id="health-heat">--</b><div class="bar"><i id="health-heat-bar"></i></div></div>
-            <div class="health-card"><span>Conversion</span><b id="health-conversion">--</b><div class="bar"><i id="health-conversion-bar"></i></div></div>
-            <div class="health-card"><span>Engagement</span><b id="health-engagement">--</b><div class="bar"><i id="health-engagement-bar"></i></div></div>
-            <div class="health-card"><span>Fatigue</span><b id="health-fatigue">--</b><div class="bar"><i id="health-fatigue-bar"></i></div></div>
+            <div class="health-card"><span>热度</span><b id="health-heat">--</b><div class="bar"><i id="health-heat-bar"></i></div></div>
+            <div class="health-card"><span>转化</span><b id="health-conversion">--</b><div class="bar"><i id="health-conversion-bar"></i></div></div>
+            <div class="health-card"><span>互动</span><b id="health-engagement">--</b><div class="bar"><i id="health-engagement-bar"></i></div></div>
+            <div class="health-card"><span>疲劳度</span><b id="health-fatigue">--</b><div class="bar"><i id="health-fatigue-bar"></i></div></div>
           </div>
           <div id="health-status" style="margin-top:10px;">等待数据...</div>
         </div>
         <div class="decision-card">
-          <span>AI Director Timeline</span>
+          <span>AI 导演时间线</span>
           <div class="timeline" id="director-timeline">
             <div class="timeline-item"><span>--</span>等待实时动作...</div>
           </div>
         </div>
         <div class="decision-card">
-          <span>Viewer Comment Clustering</span>
+          <span>评论问题聚类</span>
           <div id="comment-clusters">等待评论...</div>
-          <div><b>Suggested order</b>: <span id="comment-suggested-order">--</span></div>
+          <div><b>建议处理顺序</b>：<span id="comment-suggested-order">--</span></div>
         </div>
         <div class="decision-card">
-          <span>AI learned recommendations</span>
+          <span>AI 学到的建议</span>
           <ul id="learned-recommendations"><li>等待历史数据...</li></ul>
         </div>
         <div class="live-grid">
-          <div class="live-metric"><span>Current viewers</span><b id="viewer-count">--</b></div>
-          <div class="live-metric"><span>Current concurrent online</span><b id="concurrent-online">--</b></div>
-          <div class="live-metric"><span>Recent 5min viewers</span><b id="recent-5min-viewers">--</b></div>
+          <div class="live-metric"><span>累计观看</span><b id="viewer-count">--</b></div>
+          <div class="live-metric"><span>当前在线</span><b id="concurrent-online">--</b></div>
+          <div class="live-metric"><span>近 5 分钟观看</span><b id="recent-5min-viewers">--</b></div>
           <div class="live-metric"><span>CTR</span><b id="ctr">--</b></div>
           <div class="live-metric"><span>CVR</span><b id="cvr">--</b></div>
-          <div class="live-metric"><span>Add-to-cart rate</span><b id="cart-rate">--</b></div>
-          <div class="live-metric"><span>Average watch duration</span><b id="watch-duration">--</b></div>
-          <div class="live-metric"><span>Current live score</span><b id="ai-live-score">--</b></div>
-          <div class="live-metric"><span>Decision</span><b id="ai-live-decision">--</b></div>
-          <div class="live-metric"><span>Item</span><b id="live-item-name">--</b></div>
-          <div class="live-metric"><span>Item GMV</span><b id="live-item-gmv">--</b></div>
+          <div class="live-metric"><span>加购率</span><b id="cart-rate">--</b></div>
+          <div class="live-metric"><span>平均停留</span><b id="watch-duration">--</b></div>
+          <div class="live-metric"><span>直播得分</span><b id="ai-live-score">--</b></div>
+          <div class="live-metric"><span>AI 决策</span><b id="ai-live-decision">--</b></div>
+          <div class="live-metric"><span>当前商品</span><b id="live-item-name">--</b></div>
+          <div class="live-metric"><span>商品 GMV</span><b id="live-item-gmv">--</b></div>
           <div class="live-metric"><span>讲解效果</span><b id="live-jiangjie-effect">--</b></div>
         </div>
         <div class="action-grid">
-          <div class="action-card" id="action-continue">Continue selling</div>
-          <div class="action-card" id="action-switch">Switch product</div>
-          <div class="action-card" id="action-push">Push harder</div>
-          <div class="action-card" id="action-sizing">Explain sizing</div>
-          <div class="action-card" id="action-auth">Show authenticity proof</div>
+          <div class="action-card" id="action-continue">继续讲</div>
+          <div class="action-card" id="action-switch">切换商品</div>
+          <div class="action-card" id="action-push">轻推成交</div>
+          <div class="action-card" id="action-sizing">讲尺码</div>
+          <div class="action-card" id="action-auth">展示正品细节</div>
           <div class="action-card" id="action-skip">不做主推</div>
-          <div class="action-card" id="action-topic">Change topic</div>
+          <div class="action-card" id="action-topic">换话题保停留</div>
         </div>
         <div class="suggestions">
-          <b>AI Decision Engine</b>
+          <b>AI 决策引擎</b>
           <ul id="host-suggestions">
             <li>等待模拟数据...</li>
           </ul>
         </div>
         <div class="decision-card">
-          <span>Decision card</span>
+          <span>决策卡片</span>
           <strong id="decision-card-decision">--</strong>
           <div id="decision-card-reason">等待数据...</div>
-          <div><b>Next sentence</b>: <span id="decision-card-sentence">--</span></div>
-          <div><b>Current action</b>: <span id="decision-card-action">--</span></div>
-          <div><b>Confidence</b>: <span id="decision-card-confidence">--</span></div>
-          <div><b>Recommended next product</b>: <span id="decision-card-next-product">--</span></div>
+          <div><b>下一句</b>：<span id="decision-card-sentence">--</span></div>
+          <div><b>当前动作</b>：<span id="decision-card-action">--</span></div>
+          <div><b>置信度</b>：<span id="decision-card-confidence">--</span></div>
+          <div><b>推荐下一件</b>：<span id="decision-card-next-product">--</span></div>
         </div>
         <div class="decision-card">
-          <span>Recent product winners</span>
+          <span>近期成交商品</span>
           <div id="recent-product-winners" class="script-grid">
             <div class="script-box">等待商品事件...</div>
           </div>
         </div>
         <div class="trend-grid">
-          <div class="trend-card"><span>AI Score 30s</span><b id="trend-ai-30">--</b></div>
-          <div class="trend-card"><span>AI Score 60s</span><b id="trend-ai-60">--</b></div>
-          <div class="trend-card"><span>Item CTR 30s</span><b id="trend-click-30">--</b></div>
-          <div class="trend-card"><span>Watch 30s</span><b id="trend-watch-30">--</b></div>
-          <div class="trend-card"><span>Cart 30s</span><b id="trend-cart-30">--</b></div>
-          <div class="trend-card"><span>Conversion 60s</span><b id="trend-conv-60">--</b></div>
-          <div class="trend-card"><span>Item GMV 60s</span><b id="trend-gmv-60">--</b></div>
+          <div class="trend-card"><span>AI 得分 30秒</span><b id="trend-ai-30">--</b></div>
+          <div class="trend-card"><span>AI 得分 60秒</span><b id="trend-ai-60">--</b></div>
+          <div class="trend-card"><span>商品点击 30秒</span><b id="trend-click-30">--</b></div>
+          <div class="trend-card"><span>停留 30秒</span><b id="trend-watch-30">--</b></div>
+          <div class="trend-card"><span>加购 30秒</span><b id="trend-cart-30">--</b></div>
+          <div class="trend-card"><span>转化 60秒</span><b id="trend-conv-60">--</b></div>
+          <div class="trend-card"><span>商品 GMV 60秒</span><b id="trend-gmv-60">--</b></div>
         </div>
         <div class="decision-card">
-          <span>Recommended queue</span>
+          <span>推荐讲解顺序</span>
           <div class="order-grid" id="live-director-queue">
-            <div class="order-item"><span>Now</span><b>--</b></div>
-            <div class="order-item"><span>Next</span><b>--</b></div>
-            <div class="order-item"><span>Then</span><b>--</b></div>
-            <div class="order-item"><span>Final</span><b>--</b></div>
+            <div class="order-item"><span>现在</span><b>--</b></div>
+            <div class="order-item"><span>下一件</span><b>--</b></div>
+            <div class="order-item"><span>然后</span><b>--</b></div>
+            <div class="order-item"><span>最后</span><b>--</b></div>
           </div>
         </div>
         <div class="live-input">
-          <b>Paste mtop.taobao.tblive.portal.live.user.assistant.data.get JSON</b>
+          <b>粘贴淘宝直播 mtop JSON（备用）</b>
           <textarea id="live-assistant-data-input" spellcheck="false" placeholder='{"data":{"online_uv":520,"pv":12000,"uv":2100,"stay_time_pu":68,"pay_byr_rate":0.025,"pay_buyer_cnt":18,"pay_item_qty":24,"pay_amt":12880,"heat_score":78,"ipv_uv_rate":0.12,"comment_uv":36,"refund_amt":0,"atn_uv":45,"item_name":"当前商品","item_click_rate":0.18,"item_conversion_rate":0.035,"item_add_cart_rate":0.08,"item_gmv":6800,"jiangJieEffect":82}}'></textarea>
         </div>
         <div class="decision-card">
-          <span>Parsed live metrics</span>
+          <span>已解析直播数据</span>
           <div class="metrics">
-            <div class="metric"><span>Payload source</span><b id="debug-payload-source">--</b></div>
-            <div class="metric"><span>Payload parse success</span><b id="debug-parse-success">false</b></div>
-            <div class="metric"><span>Host / room ID</span><b id="debug-host-id">--</b></div>
+            <div class="metric"><span>数据来源</span><b id="debug-payload-source">--</b></div>
+            <div class="metric"><span>解析成功</span><b id="debug-parse-success">false</b></div>
+            <div class="metric"><span>直播间 / 主播 ID</span><b id="debug-host-id">--</b></div>
             <div class="metric"><span>online_uv</span><b id="debug-online-uv">--</b></div>
             <div class="metric"><span>heat_score</span><b id="debug-heat-score">--</b></div>
             <div class="metric"><span>pay_amt</span><b id="debug-pay-amt">--</b></div>
-            <div class="metric"><span>source</span><b id="debug-live-source">--</b></div>
-            <div class="metric"><span>Last updated</span><b id="debug-last-updated">--</b></div>
+            <div class="metric"><span>来源类型</span><b id="debug-live-source">--</b></div>
+            <div class="metric"><span>更新时间</span><b id="debug-last-updated">--</b></div>
           </div>
-          <div style="margin-top:10px;"><b>Active cloud rooms</b>: <span id="active-live-sessions">--</span></div>
+          <div style="margin-top:10px;"><b>活跃直播间</b>：<span id="active-live-sessions">--</span></div>
         </div>
         <div class="live-input">
-          <b>Manual fallback mode</b>
+          <b>手动兜底模式</b>
           <div class="manual-live-grid">
             <input id="manual-online-uv" placeholder="online_uv">
             <input id="manual-ipv-uv-rate" placeholder="ipv_uv_rate">
@@ -929,34 +929,34 @@ def _render_live_mode_dashboard() -> str:
 def _render_host_assistant(products: list[ScoredProduct]) -> str:
     current_product = products[0] if products else None
     product_name = current_product.product_name if current_product else "等待商品"
-    gmv_level = current_product.gmv_level if current_product else "--"
+    gmv_level = _gmv_label(current_product.gmv_level) if current_product else "--"
     return f"""
       <aside class="host-assistant" id="host-assistant">
-        <h2>Host Assistant Mode</h2>
+        <h2>主播助手</h2>
         <div class="host-product">
-          <span>Current product</span>
+          <span>当前商品</span>
           <b id="host-current-product">{html.escape(product_name)}</b>
         </div>
         <div class="host-mini-grid">
-          <div class="host-row"><span>Current viewers</span><b id="host-viewer-count">--</b></div>
+          <div class="host-row"><span>当前观看</span><b id="host-viewer-count">--</b></div>
           <div class="host-row"><span>CTR</span><b id="host-ctr">--</b></div>
           <div class="host-row"><span>CVR</span><b id="host-cvr">--</b></div>
-          <div class="host-row"><span>Watch duration</span><b id="host-watch-duration">--</b></div>
-          <div class="host-row"><span>AI Score</span><b id="host-ai-score">--</b></div>
-          <div class="host-row"><span>Decision</span><b id="host-ai-decision">--</b></div>
-          <div class="host-row"><span>GMV score</span><b id="host-gmv-score">{html.escape(gmv_level)}</b></div>
-          <div class="host-row"><span>Mode</span><b>Live</b></div>
+          <div class="host-row"><span>停留时长</span><b id="host-watch-duration">--</b></div>
+          <div class="host-row"><span>AI 得分</span><b id="host-ai-score">--</b></div>
+          <div class="host-row"><span>AI 决策</span><b id="host-ai-decision">--</b></div>
+          <div class="host-row"><span>GMV 潜力</span><b id="host-gmv-score">{html.escape(gmv_level)}</b></div>
+          <div class="host-row"><span>模式</span><b>直播中</b></div>
         </div>
         <div class="host-advice">
-          <span>Realtime AI suggestion</span>
+          <span>实时 AI 建议</span>
           <strong id="host-primary-suggestion">等待模拟数据...</strong>
         </div>
         <div class="next-sentence">
-          <b>Next sentence</b>
+          <b>下一句直接念</b>
           <div id="host-next-sentence">很多人问尺码</div>
         </div>
         <div class="engagement">
-          <b>Engagement suggestions</b>
+          <b>互动建议</b>
           <ul id="host-engagement-suggestions">
             <li>评论区扣1</li>
             <li>想看上身扣2</li>
@@ -1482,7 +1482,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         onlineUv.textContent = metrics ? Math.round(toNumber(metrics.online_uv)).toLocaleString() : "--";
         heatScore.textContent = metrics ? String(toNumber(metrics.heat_score_raw)) : "--";
         payAmt.textContent = metrics ? formatMoney(toNumber(metrics.pay_amt)) : "--";
-        sourceNode.textContent = source || "--";
+        sourceNode.textContent = sourceLabel(source);
         lastUpdated.textContent = metrics && metrics.last_updated
           ? new Date(metrics.last_updated * 1000).toLocaleTimeString("zh-CN", { hour12: false })
           : "--";
@@ -1492,12 +1492,27 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const sourceNode = document.getElementById("debug-payload-source");
         const successNode = document.getElementById("debug-parse-success");
         if (sourceNode) {
-          sourceNode.textContent = source || "--";
+          sourceNode.textContent = sourceLabel(source);
         }
         if (successNode) {
-          successNode.textContent = parseSuccess ? "true" : "false";
+          successNode.textContent = parseSuccess ? "是" : "否";
         }
         updateParsedMetricsDebug(metrics || null, source || "--");
+      }
+
+      function sourceLabel(source) {
+        const labels = {
+          "extension": "Chrome 插件",
+          "chrome_extension": "Chrome 插件",
+          "connector": "实时接口",
+          "real_api": "实时接口",
+          "pasted": "粘贴数据",
+          "pasted_payload": "粘贴数据",
+          "manual": "手动输入",
+          "mock": "演示数据",
+          "page_payload": "页面兜底"
+        };
+        return labels[source] || source || "--";
       }
 
       function updateLiveDirectorStateFromTextarea() {
@@ -1510,7 +1525,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           liveDirectorState.hasValidPastedPayload = false;
           liveDirectorState.payloadParseSuccess = false;
           updatePayloadDebug("pasted", false, null);
-          document.getElementById("live-status").textContent = "Live assistant JSON parse error: " + payload.error_message;
+          document.getElementById("live-status").textContent = "直播 JSON 解析失败：" + payload.error_message;
           return null;
         }
         if (!payload) {
@@ -1848,14 +1863,55 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const actions = {
           "Continue product": "继续讲当前商品",
           "Switch product": "切换下一件",
-          "Push harder": "加速逼单",
+          "Push harder": "加速成交",
           "不做主推": "不做主推",
           "Change topic": "换话题保停留",
           "Explain value/price": "解释价值和价格",
           "Explain sizing": "开始讲尺码",
-          "Show authenticity": "展示吊牌和洗标"
+          "Show authenticity": "展示吊牌和洗标",
+          "No valid live metrics detected": "等待有效直播数据",
+          "数据不完整，等待 totalStats / 插件补齐": "等待完整数据"
         };
         return actions[decision] || "继续观察";
+      }
+
+      function displayActionText(action, decisionName) {
+        const raw = String(action || "");
+        if (!raw) {
+          return currentActionText(decisionName);
+        }
+        if (/[a-z]/i.test(raw)) {
+          return currentActionText(decisionName);
+        }
+        return raw;
+      }
+
+      function displayDecisionName(decision) {
+        const labels = {
+          "Continue product": "继续讲当前商品",
+          "Switch product": "切换商品",
+          "Push harder": "加速成交",
+          "不做主推": "不做主推",
+          "Change topic": "换话题保停留",
+          "Explain value/price": "解释价格价值",
+          "Explain sizing": "讲尺码",
+          "Show authenticity": "展示正品细节",
+          "No valid live metrics detected": "未检测到有效直播数据",
+          "数据不完整，等待 totalStats / 插件补齐": "数据不完整，等待插件补齐"
+        };
+        return labels[decision] || decision || "--";
+      }
+
+      function displayModeName(mode) {
+        const text = String(mode || "").toLowerCase();
+        if (text.includes("limited") || text.includes("有限")) { return "有限实时数据模式"; }
+        if (text.includes("traffic growth") || text.includes("growth")) { return "流量增长模式"; }
+        if (text.includes("rescue")) { return "救场模式"; }
+        if (text.includes("hot")) { return "热卖模式"; }
+        if (text.includes("closing")) { return "收口模式"; }
+        if (text.includes("opening")) { return "开场模式"; }
+        if (text.includes("waiting")) { return "等待数据模式"; }
+        return mode || "--";
       }
 
       function buildDecisionReasons(metrics, trends) {
@@ -1863,7 +1919,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (decision === "数据不完整，等待 totalStats / 插件补齐") {
           return {
             decision: decision,
-            reasons: (metrics.missing_metrics || []).slice(0, 3).map(function(item) { return "missing: " + item; }),
+            reasons: (metrics.missing_metrics || []).slice(0, 3).map(function(item) { return "缺失：" + item; }),
             sentence: "先别根据这组数据切品，等 totalStats / 插件补齐。",
             action: "等待完整数据"
           };
@@ -1888,25 +1944,25 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
       function buildSuggestions(metrics, trends) {
         const decision = buildDecisionReasons(metrics, trends);
         const suggestions = [
-          "Decision: " + decision.decision,
-          "Reason: " + decision.reasons.join(" / "),
-          "Next host sentence: " + decision.sentence
+          "AI 决策：" + displayDecisionName(decision.decision),
+          "原因：" + decision.reasons.join(" / "),
+          "下一句：" + decision.sentence
         ];
         return suggestions;
       }
 
       function chooseHostSuggestion(metrics) {
         if (metrics.watch_time < 30) {
-          return "Switch product";
+          return "切换商品";
         }
         if (metrics.authenticity_questions > 3) {
-          return "Show tag and details";
+          return "展示吊牌和细节";
         }
         if (metrics.sizing_questions > 3) {
-          return "Explain sizing";
+          return "讲尺码";
         }
         if (metrics.ctr > 0.07 && metrics.cvr < 0.02) {
-          return "Explain value and pricing";
+          return "解释价格价值";
         }
         if (metrics.cart_rate > 0.05) {
           return "制造紧迫感";
@@ -1955,7 +2011,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           if (window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1") console.log("connector returned no valid live metrics; trying manual fallback");
         } catch (error) {
           if (window.localStorage && window.localStorage.getItem("ai_live_debug_logs") === "1") console.log("connector failed; trying manual fallback", error);
-          document.getElementById("live-status").textContent = "Live connector fallback: " + error.message;
+          document.getElementById("live-status").textContent = "直播连接兜底：" + error.message;
         }
         const pastedPayload = updateLiveDirectorStateFromTextarea();
         if (pastedPayload && liveDirectorState.hasValidPastedPayload && liveDirectorState.latestMetrics) {
@@ -1966,8 +2022,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (liveDirectorState.hasPastedTextareaContent) {
           document.getElementById("live-status").textContent = (
             liveDirectorState.payloadParseSuccess
-              ? "Pasted payload parsed, but no valid live metrics found. Mock simulator disabled."
-              : "Pasted payload exists but JSON parse failed. Mock simulator disabled."
+              ? "粘贴内容已解析，但没有有效直播指标；演示数据已禁用。"
+              : "已检测到粘贴内容，但 JSON 解析失败；演示数据已禁用。"
           );
           return;
         }
@@ -2089,12 +2145,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function serverTrendToCard(direction) {
         if (direction === "up") {
-          return { label: "up ↑", className: "trend-up", direction: "up" };
+            return { label: "上升 ↑", className: "trend-up", direction: "up" };
         }
         if (direction === "down") {
-          return { label: "down ↓", className: "trend-down", direction: "down" };
+            return { label: "下降 ↓", className: "trend-down", direction: "down" };
         }
-        return { label: "stable →", className: "trend-stable", direction: "stable" };
+          return { label: "稳定 →", className: "trend-stable", direction: "stable" };
       }
 
       function trendsFromConnector(data) {
@@ -2152,14 +2208,35 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         setBar("health-conversion", health.conversion_score || 0);
         setBar("health-engagement", health.engagement_score || 0);
         setBar("health-fatigue", health.fatigue_score || 0);
-        document.getElementById("health-status").textContent = health.status || "等待数据...";
+        document.getElementById("health-status").textContent = healthStatusText(health.status);
+      }
+
+      function healthStatusText(status) {
+        const text = String(status || "");
+        if (!text) { return "等待数据..."; }
+        if (text.includes("Watch closely") || text.includes("Need stronger interaction")) {
+          return "继续观察，需要更强互动。";
+        }
+        if (text.includes("shown too long") || text.includes("switch soon")) {
+          return "当前商品讲得偏久，准备收口切品。";
+        }
+        return text;
       }
 
       function renderSwitchRecommendation(recommendation) {
         recommendation = recommendation || {};
-        document.getElementById("switch-recommendation").textContent = recommendation.recommendation || "--";
+        document.getElementById("switch-recommendation").textContent = switchRecommendationText(recommendation.recommendation);
         document.getElementById("current-expected-gmv").textContent = formatMoney(recommendation.current_expected_gmv || 0);
         document.getElementById("recommended-expected-gmv").textContent = formatMoney(recommendation.recommended_expected_gmv || 0);
+      }
+
+      function switchRecommendationText(recommendation) {
+        const text = String(recommendation || "");
+        if (!text) { return "--"; }
+        if (text.includes("Hold") || text.includes("monitor")) { return "先不切，继续观察"; }
+        if (text.includes("Switch")) { return "现在切品"; }
+        if (text.includes("Wait")) { return "等待更多数据"; }
+        return text;
       }
 
       function renderCommentClusters(clusters) {
@@ -2229,14 +2306,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           const time = new Date((item.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
           const tone = item.event_type === "danger" ? "danger" : item.event_type === "warning" ? "warn" : "";
           const marker = timelineMarker(item);
-          const repeat = item.repeat_count && item.repeat_count > 1 ? " · stable x" + item.repeat_count : "";
-          const mode = item.mode ? " · " + item.mode : "";
+          const repeat = item.repeat_count && item.repeat_count > 1 ? " · 稳定 x" + item.repeat_count : "";
+          const mode = item.mode ? " · " + displayModeName(item.mode) : "";
           return '<div class="timeline-item ' + tone + '">'
             + '<span>' + escapeHtml(time) + '</span>'
-            + '<b>' + marker + ' ' + escapeHtml(item.decision || "--") + escapeHtml(mode) + escapeHtml(repeat) + '</b>'
-            + '<div>Reason: ' + escapeHtml((item.reason || []).join(" / ")) + '</div>'
-            + '<div>Action: ' + escapeHtml(item.next_action || "--") + '</div>'
-            + '<div>Confidence: ' + Math.round(toNumber(item.confidence) * 100) + '%</div>'
+            + '<b>' + marker + ' ' + escapeHtml(displayDecisionName(item.decision || "--")) + escapeHtml(mode) + escapeHtml(repeat) + '</b>'
+            + '<div>原因：' + escapeHtml((item.reason || []).join(" / ")) + '</div>'
+            + '<div>动作：' + escapeHtml(item.next_action || "--") + '</div>'
+            + '<div>置信度：' + Math.round(toNumber(item.confidence) * 100) + '%</div>'
             + '</div>';
         }).join("");
       }
@@ -2256,6 +2333,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const text = String(action || "").toLowerCase();
         if (text.includes("no valid live metrics")) { return "No valid live metrics detected"; }
         if (text.includes("数据不完整")) { return "数据不完整，等待 totalStats / 插件补齐"; }
+        if (text.includes("light push") || text.includes("轻推")) { return "Continue product"; }
         if (text.includes("switch")) { return "Switch product"; }
         if (text.includes("value")) { return "Explain value/price"; }
         if (text.includes("authenticity")) { return "Show authenticity"; }
@@ -2276,7 +2354,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           decision: decisionName,
           reasons: (data.reason || []).slice(0, 3),
           sentence: data.next_action || nextHostSentence(decisionName, metrics),
-          action: data.current_action || currentActionText(decisionName),
+          action: displayActionText(data.current_action, decisionName),
           confidence: data.confidence || 0
         };
         const trends = trendsFromConnector(data);
@@ -2299,14 +2377,14 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
         document.getElementById("live-status").textContent = (
           noValidMetrics
-            ? "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
+            ? "未检测到有效直播数据。请粘贴有效淘宝 mtop 数据，或打开 Chrome 插件连接。"
             : data.source === "real_api"
-            ? "Using real live metrics API · " + metrics.host_id + " · updates every 5s"
+            ? "使用实时直播接口 · " + metrics.host_id + " · 每 5 秒更新"
             : data.source === "chrome_extension"
-            ? "Using Chrome Extension Taobao live connector · " + metrics.host_id + " · updates every 5s"
+            ? "使用 Chrome 插件采集淘宝直播数据 · " + metrics.host_id + " · 每 5 秒更新"
             : data.source === "page_payload"
-            ? "Using pasted/manual live payload via connector · " + metrics.host_id + " · updates every 5s"
-            : "Live connector not connected · open Taobao with the Chrome extension or configure LIVE_METRICS_API_URL"
+            ? "使用粘贴/手动直播数据 · " + metrics.host_id + " · 每 5 秒更新"
+            : "直播连接未接入 · 请打开淘宝中控并启用 Chrome 插件"
         );
         document.getElementById("viewer-count").textContent = totalViewerText(metrics);
         document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
@@ -2316,7 +2394,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("cart-rate").textContent = formatPercent(metrics.item_add_cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(liveScore * 100);
-        document.getElementById("ai-live-decision").textContent = decision.decision;
+        document.getElementById("ai-live-decision").textContent = displayDecisionName(decision.decision);
         const displayProduct = currentLiveProduct(metrics.item_name);
         document.getElementById("live-item-name").textContent = displayProduct.matched_from_inventory ? displayProduct.name : (metrics.item_name || "当前商品");
         document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
@@ -2324,7 +2402,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
         document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";
-        document.getElementById("director-mode").textContent = data.livestream_mode || "--";
+        document.getElementById("director-mode").textContent = displayModeName(data.livestream_mode);
         document.getElementById("director-next-product").textContent = data.recommended_next_product || "--";
         document.getElementById("director-confidence").textContent = Math.round(decision.confidence * 100) + "%";
         updateTrendCards(trends);
@@ -2341,9 +2419,9 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
         const suggestionList = document.getElementById("host-suggestions");
         suggestionList.innerHTML = [
-          "Current action: " + decision.action,
-          "Next action: " + decision.sentence,
-          "Confidence: " + Math.round(decision.confidence * 100) + "%"
+          "当前动作：" + decision.action,
+          "下一步：" + decision.sentence,
+          "置信度：" + Math.round(decision.confidence * 100) + "%"
         ].map(function(text) { return "<li>" + escapeHtml(text) + "</li>"; }).join("");
       }
 
@@ -2358,18 +2436,18 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const decision = buildDecisionReasons(metrics, trends);
         const queue = buildRecommendedQueue(metrics, decision);
         const liveStatusText = metrics.source === "pasted_payload"
-          ? "Using pasted Taobao live payload · updates every 5s"
+          ? "使用粘贴的淘宝直播数据 · 每 5 秒更新"
           : metrics.source === "real"
-          ? "Using real Taobao live assistant data · updates every 5s"
+          ? "使用淘宝直播助手真实数据 · 每 5 秒更新"
           : metrics.source === "manual"
-          ? "Using manual fallback metrics · updates every 5s"
-          : "Mock livestream simulator · updates every 5s";
+          ? "使用手动兜底数据 · 每 5 秒更新"
+          : "演示数据模拟器 · 每 5 秒更新";
         const debugSource = metrics.source === "pasted_payload" ? "pasted" : (metrics.source || "mock");
         updatePayloadDebug(debugSource, hasValidLiveMetrics(metrics), metrics);
         document.getElementById("live-status").textContent = (
           hasValidLiveMetrics(metrics)
             ? liveStatusText
-            : "No valid live metrics detected. Please paste valid Taobao mtop payload or configure live connector."
+            : "未检测到有效直播数据。请粘贴有效淘宝 mtop 数据，或打开 Chrome 插件连接。"
         );
         document.getElementById("viewer-count").textContent = totalViewerText(metrics);
         document.getElementById("concurrent-online").textContent = metricNumberText(metrics, "online_uv", metrics.online_uv);
@@ -2379,7 +2457,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("cart-rate").textContent = formatPercent(metrics.cart_rate);
         document.getElementById("watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("ai-live-score").textContent = Math.round(metrics.current_product_score * 100);
-        document.getElementById("ai-live-decision").textContent = decision.decision;
+        document.getElementById("ai-live-decision").textContent = displayDecisionName(decision.decision);
         const displayProduct = currentLiveProduct(metrics.item_name);
         document.getElementById("live-item-name").textContent = displayProduct.matched_from_inventory ? displayProduct.name : (metrics.item_name || "当前商品");
         document.getElementById("live-item-gmv").textContent = metricMoneyText(metrics, "pay_amt", metrics.item_gmv || metrics.pay_amt || 0);
@@ -2387,7 +2465,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("director-current-action").textContent = decision.action;
         document.getElementById("director-next-sentence").textContent = decision.sentence;
         document.getElementById("director-reason").textContent = decision.reasons.join(" / ") || "--";
-        document.getElementById("director-mode").textContent = metrics.watch_time < 30 ? "Rescue mode" : "Traffic growth mode";
+        document.getElementById("director-mode").textContent = metrics.watch_time < 30 ? "救场模式" : "流量增长模式";
         document.getElementById("director-next-product").textContent = queue[1] ? queue[1].product.name : "--";
         document.getElementById("director-confidence").textContent = "--";
         updateTrendCards(trends);
@@ -2429,12 +2507,12 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         const diff = current - previous;
         const threshold = Math.max(0.003, Math.abs(previous) * 0.05);
         if (diff > threshold) {
-          return { label: "up ↑", className: "trend-up", direction: "up" };
+          return { label: "上升 ↑", className: "trend-up", direction: "up" };
         }
         if (diff < -threshold) {
-          return { label: "down ↓", className: "trend-down", direction: "down" };
+          return { label: "下降 ↓", className: "trend-down", direction: "down" };
         }
-        return { label: "stable →", className: "trend-stable", direction: "stable" };
+        return { label: "稳定 →", className: "trend-stable", direction: "stable" };
       }
 
       function buildTrendSummary(metrics) {
@@ -2483,13 +2561,13 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           queue.push(queue[queue.length - 1]);
         }
         return queue.slice(0, 4).map(function(product, index) {
-          const labels = ["Now", "Next", "Then", "Final"];
+          const labels = ["现在", "下一件", "然后", "最后"];
           return { label: labels[index], product: product };
         });
       }
 
       function updateDecisionCard(decision, queue, recommendedNextProduct) {
-        document.getElementById("decision-card-decision").textContent = decision.decision;
+        document.getElementById("decision-card-decision").textContent = displayDecisionName(decision.decision);
         document.getElementById("decision-card-reason").textContent = decision.reasons.join(" / ");
         document.getElementById("decision-card-sentence").textContent = decision.sentence;
         document.getElementById("decision-card-action").textContent = decision.action;
@@ -2503,7 +2581,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
           return;
         }
         if (!queue.length) {
-          node.innerHTML = '<div class="order-item"><span>Now</span><b>--</b></div>';
+          node.innerHTML = '<div class="order-item"><span>现在</span><b>--</b></div>';
           return;
         }
         node.innerHTML = queue.map(function(item) {
@@ -2526,8 +2604,8 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         document.getElementById("host-cvr").textContent = formatPercent(metrics.pay_byr_rate);
         document.getElementById("host-watch-duration").textContent = Math.round(metrics.watch_time) + "s";
         document.getElementById("host-ai-score").textContent = Math.round(metrics.current_product_score * 100);
-        document.getElementById("host-ai-decision").textContent = decision.decision;
-        document.getElementById("host-primary-suggestion").textContent = decision.decision;
+        document.getElementById("host-ai-decision").textContent = displayDecisionName(decision.decision);
+        document.getElementById("host-primary-suggestion").textContent = displayDecisionName(decision.decision);
         document.getElementById("host-next-sentence").textContent = decision.sentence;
         const shuffled = engagementOptions.slice().sort(function() { return Math.random() - 0.5; }).slice(0, 3);
         document.getElementById("host-engagement-suggestions").innerHTML = shuffled
@@ -2548,23 +2626,23 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
             else if (height <= 178 && weight <= 75) { size = "M"; layer = "L"; }
             else if (height <= 184 && weight <= 85) { size = "L"; layer = "XL"; }
             else { size = "XL"; layer = "XXL"; }
-            return { reply: height + "/" + weight + "kg 正常" + size + "，里面加卫衣建议" + layer, confidence: "88%", action: "Explain sizing" };
+            return { reply: height + "/" + weight + "kg 正常" + size + "，里面加卫衣建议" + layer, confidence: "88%", action: "讲尺码" };
           }
-          return { reply: "尺码别乱拍，把身高体重打出来，里面要加卫衣就大半码。", confidence: "80%", action: "Explain sizing" };
+          return { reply: "尺码别乱拍，把身高体重打出来，里面要加卫衣就大半码。", confidence: "80%", action: "讲尺码" };
         }
         if (/真假|真的假的|正品|吊牌|洗标/.test(text)) {
-          return { reply: "真假别听我空说，镜头拉近看吊牌、洗标、拉链和走线。", confidence: "90%", action: "Show authenticity proof" };
+          return { reply: "真假别听我空说，镜头拉近看吊牌、洗标、拉链和走线。", confidence: "90%", action: "展示正品细节" };
         }
         if (/黑色|黑/.test(text)) {
-          return { reply: "想看黑色扣3，我等下直接拿近镜头给你看色差和细节。", confidence: "82%", action: "Show color option" };
+          return { reply: "想看黑色扣3，我等下直接拿近镜头给你看色差和细节。", confidence: "82%", action: "展示颜色库存" };
         }
         if (/值|值得|贵|价格|划算/.test(text)) {
-          return { reply: "别光看价格，能通勤、能户外，买回去不会吃灰才是真的值。", confidence: "84%", action: "Explain value and pricing" };
+          return { reply: "别光看价格，能通勤、能户外，买回去不会吃灰才是真的值。", confidence: "84%", action: "解释价格价值" };
         }
         if (/冬天|够暖|保暖|冷/.test(text)) {
-          return { reply: "冬天够不够暖看地区，通勤没问题，特别冷里面加抓绒。", confidence: "82%", action: "Explain warmth" };
+          return { reply: "冬天够不够暖看地区，通勤没问题，特别冷里面加抓绒。", confidence: "82%", action: "讲保暖场景" };
         }
-        return { reply: "这个问题我先记一下，宝子们继续看细节，有具体尺码直接打出来。", confidence: "55%", action: "Ask follow-up" };
+        return { reply: "这个问题我先记一下，宝子们继续看细节，有具体尺码直接打出来。", confidence: "55%", action: "追问补充信息" };
       }
 
       function updateLiveCommentAssistant() {
@@ -2631,10 +2709,10 @@ def _livestream_order(
     final_product = (skip[-1] if skip else ordered[-1])
 
     return {
-        "Start product": (start_product, "Push hard / easiest conversion"),
-        "Second product": (second_product, "Push hard or 短讲 / traffic builder"),
-        "Third product": (third_product, "profit or secondary mention"),
-        "Final product": (final_product, "premium closer or non-primary product held to the end"),
+        "开场主推": (start_product, "最容易承接转化"),
+        "第二件承接": (second_product, "承接流量，继续拉互动"),
+        "第三件补充": (third_product, "利润/转化兼顾"),
+        "最后收口": (final_product, "后段收口或快速过款"),
     }
 
 
@@ -2646,14 +2724,14 @@ def _render_livestream_order(order: dict[str, tuple[ScoredProduct, str]]) -> str
         <div class="order-item">
           <span>{html.escape(slot)}</span>
           <b>{html.escape(product.product_name)}</b>
-          <div>{html.escape(reason)} · Score {product.score:.3f} · GMV {product.gmv_level}</div>
+          <div>{html.escape(reason)} · 综合分 {product.score:.3f} · GMV潜力 {_gmv_label(product.gmv_level)}</div>
           {_list(product.ranking_explanation[:2])}
         </div>"""
         for slot, (product, reason) in order.items()
     )
     return f"""
       <section class="order-panel">
-        <h2>Today's Top Products</h2>
+        <h2>今日主推顺序</h2>
         <div class="order-grid">{items}</div>
       </section>"""
 
@@ -2666,31 +2744,31 @@ def _render_post_live_analysis(products: list[ScoredProduct]) -> str:
     best_product = max(products, key=lambda product: product.gmv_score)
     worst_product = min(products, key=lambda product: product.gmv_score)
     reasons = [
-        f"最佳商品 {best_product.product_name}：流量={best_product.traffic_score:.2f}，转化={best_product.conversion_score:.2f}，GMV={best_product.gmv_level}。",
+        f"最佳商品 {best_product.product_name}：流量={best_product.traffic_score:.2f}，转化={best_product.conversion_score:.2f}，GMV潜力={_gmv_label(best_product.gmv_level)}。",
         f"最弱商品 {worst_product.product_name}：转化难度={worst_product.sellability.conversion_difficulty:.2f}，建议减少讲解时长。",
         "不做主推/过款产品不要放前段，避免刚开场损失在线和互动。",
     ]
     suggestions = [
-        "下一场先用 Push hard 商品开场，快速拉互动和加购。",
+        "下一场先用主推商品开场，快速拉互动和加购。",
         "高 CTR 低 CVR 时优先解释价格价值，不要急着换款。",
         "尺码和真假问题集中出现时，提前准备吊牌、洗标、上身尺码话术。",
     ]
     return f"""
       <section class="order-panel">
-        <h2>Post-Live Analysis</h2>
+        <h2>直播复盘</h2>
         <div class="metrics">
-          {_metric("Total viewers", f"{total_viewers:,}")}
-          {_metric("Estimated GMV", _money(estimated_gmv, "CNY"))}
-          {_metric("Best product", best_product.product_name)}
-          {_metric("Worst product", worst_product.product_name)}
+          {_metric("累计观看", f"{total_viewers:,}")}
+          {_metric("预估 GMV", _money(estimated_gmv, "CNY"))}
+          {_metric("最佳商品", best_product.product_name)}
+          {_metric("最弱商品", worst_product.product_name)}
         </div>
         <div class="grid">
           <div>
-            <h3>Reasons</h3>
+            <h3>原因</h3>
             {_list(reasons)}
           </div>
           <div>
-            <h3>Next livestream suggestions</h3>
+            <h3>下场直播建议</h3>
             {_list(suggestions)}
           </div>
         </div>
@@ -2712,15 +2790,15 @@ def _render_audience_question_assistant(answers: list[AudienceQuestionResponse])
     )
     return f"""
       <section class="order-panel">
-        <h2>Audience Question Assistant</h2>
+        <h2>观众问题助手</h2>
         <div class="table-wrap">
           <table class="question-table">
             <thead>
               <tr>
-                <th>Viewer comment</th>
-                <th>Short host reply</th>
-                <th>Confidence</th>
-                <th>Suggested action</th>
+                <th>观众评论</th>
+                <th>主播短回复</th>
+                <th>置信度</th>
+                <th>建议动作</th>
               </tr>
             </thead>
             <tbody>{rows}</tbody>
@@ -2732,19 +2810,19 @@ def _render_audience_question_assistant(answers: list[AudienceQuestionResponse])
 def _render_live_comment_input() -> str:
     return """
       <section class="order-panel live-comment-input">
-        <h2>Live Comment Input</h2>
+        <h2>实时评论输入</h2>
         <textarea id="live-comments-input" spellcheck="false">175 70kg穿啥
 真的假的
 黑色有吗</textarea>
-        <div class="hint">粘贴实时评论，每行一条；系统每 5 秒生成 reply / confidence / next action。</div>
+        <div class="hint">粘贴实时评论，每行一条；系统每 5 秒生成回复 / 置信度 / 下一步动作。</div>
         <div class="table-wrap">
           <table class="question-table">
             <thead>
               <tr>
-                <th>Viewer comment</th>
-                <th>Reply</th>
-                <th>Confidence</th>
-                <th>Next action</th>
+                <th>观众评论</th>
+                <th>回复</th>
+                <th>置信度</th>
+                <th>下一步动作</th>
               </tr>
             </thead>
             <tbody id="live-comment-results">
@@ -2781,12 +2859,12 @@ def _market_price_table(product: ScoredProduct) -> str:
         <table>
           <thead>
             <tr>
-              <th>Platform</th>
-              <th>Seller/source</th>
-              <th>Title</th>
-              <th>Price</th>
+              <th>平台</th>
+              <th>卖家/来源</th>
+              <th>标题</th>
+              <th>价格</th>
               <th>URL</th>
-              <th>Confidence</th>
+              <th>置信度</th>
             </tr>
           </thead>
           <tbody>{rows}</tbody>
@@ -2799,16 +2877,16 @@ def _real_vs_inferred(product: ScoredProduct) -> str:
     real_price_count = len(market.price_results) if market else 0
     real_social_posts = sum(len(signal.evidence_posts) for signal in market.social_signals) if market else 0
     inferred = [
-        "sellability",
-        "competition_score" if not product.avg_competitor_price else "",
-        "host scripts",
-        "GMV potential",
+        "直播好卖度",
+        "竞争分" if not product.avg_competitor_price else "",
+        "主播话术",
+        "GMV 潜力",
     ]
     inferred = [item for item in inferred if item]
     return _list(
         [
-            f"Real data: {real_price_count} 条价格证据，{real_social_posts} 条真实社媒帖子证据。",
-            f"AI inferred data: {', '.join(inferred)}。",
+            f"真实数据：{real_price_count} 条价格证据，{real_social_posts} 条真实社媒帖子证据。",
+            f"AI 推断：{', '.join(inferred)}。",
         ]
     )
 
@@ -2819,7 +2897,7 @@ def _social_heat_signals(product: ScoredProduct) -> str:
     preferred_signals = [signal for signal in signals if signal.platform in preferred_platforms]
     signals = preferred_signals or signals
     if not signals:
-        return '<p class="empty">No real social evidence found</p>'
+        return '<p class="empty">未找到真实社媒证据</p>'
 
     cards = []
     for signal in signals:
@@ -2828,12 +2906,12 @@ def _social_heat_signals(product: ScoredProduct) -> str:
             f"""
             <div class="script-box">
               <h4>{html.escape(signal.platform)} · 热度 {signal.popularity_score:.0%}</h4>
-              <b>Top keywords</b>{_list(signal.keywords) if signal.keywords else '<p class="empty">Metrics unavailable</p>'}
-              <b>Positive points</b>{_list(signal.positive_points) if signal.positive_points else '<p class="empty">Metrics unavailable</p>'}
-              <b>Main concerns</b>{_list(signal.concerns) if signal.concerns else '<p class="empty">Metrics unavailable</p>'}
-              <b>Top comments</b>{_top_comments_for_signal(signal)}
-              <b>Most common user language</b>{_list(signal.most_common_user_language) if signal.most_common_user_language else '<p class="empty">Metrics unavailable</p>'}
-              <b>Real evidence</b>{evidence}
+              <b>高频关键词</b>{_list(signal.keywords) if signal.keywords else '<p class="empty">指标不可用</p>'}
+              <b>正向卖点</b>{_list(signal.positive_points) if signal.positive_points else '<p class="empty">指标不可用</p>'}
+              <b>主要顾虑</b>{_list(signal.concerns) if signal.concerns else '<p class="empty">指标不可用</p>'}
+              <b>高价值评论</b>{_top_comments_for_signal(signal)}
+              <b>用户常用表达</b>{_list(signal.most_common_user_language) if signal.most_common_user_language else '<p class="empty">指标不可用</p>'}
+              <b>真实链接证据</b>{evidence}
             </div>"""
         )
     return '<div class="script-grid">' + "".join(cards) + "</div>"
@@ -2842,12 +2920,12 @@ def _social_heat_signals(product: ScoredProduct) -> str:
 def _social_evidence_posts(signal: Any) -> str:
     posts = getattr(signal, "evidence_posts", [])
     if not posts:
-        return '<p class="empty">No real social evidence found</p>'
+        return '<p class="empty">未找到真实社媒证据</p>'
 
     items = []
     for post in posts:
         metrics = _post_metrics(post)
-        top_comments = _list(post.top_comments) if post.top_comments else '<p class="empty">Metrics unavailable</p>'
+        top_comments = _list(post.top_comments) if post.top_comments else '<p class="empty">指标不可用</p>'
         image = (
             f'<img src="{html.escape(post.cover_image)}" alt="{html.escape(post.post_title)}" '
             'style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin:8px 0;">'
@@ -2860,7 +2938,7 @@ def _social_evidence_posts(signal: Any) -> str:
               {image}
               <b>{html.escape(post.post_title)}</b><br>
               <span>{metrics}</span><br>
-              <b>Top comments</b>{top_comments}
+              <b>高价值评论</b>{top_comments}
               {_link(post.real_url)}
             </li>"""
         )
@@ -2873,16 +2951,16 @@ def _top_comments_for_signal(signal: Any) -> str:
         for post in getattr(signal, "evidence_posts", [])
         for comment in getattr(post, "top_comments", [])
     ]
-    return _list(comments[:6]) if comments else '<p class="empty">Metrics unavailable</p>'
+    return _list(comments[:6]) if comments else '<p class="empty">指标不可用</p>'
 
 
 def _post_metrics(post: Any) -> str:
     if post.likes is None and post.favorites is None and post.comments is None:
-        return "Metrics unavailable"
+        return "指标不可用"
     return (
-        f"Likes: {_metric_or_na(post.likes)} · "
-        f"Favorites: {_metric_or_na(post.favorites)} · "
-        f"Comments: {_metric_or_na(post.comments)}"
+        f"点赞：{_metric_or_na(post.likes)} · "
+        f"收藏：{_metric_or_na(post.favorites)} · "
+        f"评论：{_metric_or_na(post.comments)}"
     )
 
 
@@ -2892,25 +2970,25 @@ def _ai_script(report: dict[str, Any]) -> str:
     return f"""
       <div class="script-grid">
         <div class="script-box">
-          <h4>15-second opening hook</h4>
+          <h4>15 秒开场钩子</h4>
           <p>{html.escape(script["opening_hook_15s"])}</p>
         </div>
         <div class="script-box">
-          <h4>60-second selling script</h4>
+          <h4>60 秒讲解话术</h4>
           <p>{html.escape(script["selling_script_60s"])}</p>
         </div>
         <div class="script-box">
-          <h4>Objection handling</h4>
+          <h4>异议处理</h4>
           <ul>
-            <li><b>Authenticity:</b> {html.escape(objections["authenticity"])}</li>
-            <li><b>Sizing:</b> {html.escape(objections["sizing"])}</li>
-            <li><b>Price:</b> {html.escape(objections["price"])}</li>
+            <li><b>正品：</b> {html.escape(objections["authenticity"])}</li>
+            <li><b>尺码：</b> {html.escape(objections["sizing"])}</li>
+            <li><b>价格：</b> {html.escape(objections["price"])}</li>
           </ul>
         </div>
         <div class="script-box">
-          <h4>Comparison script</h4>
+          <h4>对比话术</h4>
           <p>{html.escape(script["comparison_script"])}</p>
-          <h4>Closing urgency line</h4>
+          <h4>收口催单话术</h4>
           <p>{html.escape(script["closing_urgency_line"])}</p>
         </div>
       </div>"""
@@ -2920,25 +2998,42 @@ def _warning_list(product: ScoredProduct) -> str:
     warnings = product.market_research.warnings if product.market_research else []
     if not warnings:
         return ""
-    return '<div class="warning"><b>数据提示</b>' + _list(warnings) + "</div>"
+    return '<div class="warning"><b>数据提示</b>' + _list([_localize_report_text(item) for item in warnings]) + "</div>"
 
 
 def _evidence_summary(product: ScoredProduct) -> str:
     evidence = product.market_research.evidence_summary if product.market_research else []
     if not evidence:
         return ""
-    return '<div class="evidence"><b>数据证据摘要</b>' + _list(evidence) + "</div>"
+    return '<div class="evidence"><b>数据证据摘要</b>' + _list([_localize_report_text(item) for item in evidence]) + "</div>"
+
+
+def _localize_report_text(text: str) -> str:
+    replacements = {
+        "No real social evidence found": "未找到真实社媒证据",
+        "Metrics unavailable": "指标不可用",
+        "Google Shopping": "Google Shopping",
+        "FX_API_URL is not configured; using manual fallback CAD/CNY rate": "未配置 FX_API_URL，正在使用手动兜底 CAD/CNY 汇率",
+        "using manual fallback CAD/CNY rate": "正在使用手动兜底 CAD/CNY 汇率",
+        "manual fallback": "手动兜底",
+        "Real data": "真实数据",
+        "AI inferred data": "AI 推断",
+    }
+    localized = str(text)
+    for source, target in replacements.items():
+        localized = localized.replace(source, target)
+    return localized
 
 
 def _link(url: str) -> str:
     if not url:
-        return "N/A"
+        return "--"
     return f'<a href="{html.escape(url)}" target="_blank" rel="noreferrer">查看</a>'
 
 
 def _link_list(urls: list[str]) -> str:
     if not urls:
-        return "<ul><li>N/A</li></ul>"
+        return "<ul><li>--</li></ul>"
     return "<ul>" + "".join(f"<li>{_link(url)}</li>" for url in urls) + "</ul>"
 
 
@@ -2953,17 +3048,26 @@ def _decision_label(decision: str) -> str:
     return labels.get(decision, "待判断")
 
 
+def _gmv_label(level: str) -> str:
+    labels = {
+        "High": "高",
+        "Medium": "中",
+        "Low": "低",
+    }
+    return labels.get(level, level or "--")
+
+
 def _money_or_na(value: float | None, currency: str = "CNY") -> str:
-    return _money(value, currency) if value is not None else "N/A"
+    return _money(value, currency) if value is not None else "--"
 
 
 def _metric_or_na(value: int | None) -> str:
-    return f"{value:,}" if value is not None else "Metrics unavailable"
+    return f"{value:,}" if value is not None else "指标不可用"
 
 
 def _money(value: float | None, currency: str = "CNY") -> str:
     if value is None:
-        return "N/A"
+        return "--"
     currency = currency.upper()
     if currency == "CNY":
         return f"¥{value:,.2f} CNY"
@@ -2976,14 +3080,14 @@ def _money(value: float | None, currency: str = "CNY") -> str:
 
 def _source_currency_label(value: float | None, currency: str) -> str:
     if value is None:
-        return "N/A"
+        return "--"
     currency = currency.upper()
     return _money(value, currency)
 
 
 def _market_price_label(value: float | None, currency: str = "CNY") -> str:
     if value is None:
-        return "N/A"
+        return "--"
     currency = currency.upper()
     original = _money(value, currency)
     if currency == "USD":
