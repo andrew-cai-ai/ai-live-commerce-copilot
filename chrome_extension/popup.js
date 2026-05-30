@@ -27,6 +27,7 @@ function render(status) {
   const content = yesNo(status.contentScriptInjected);
   const hook = yesNo(status.pageHookInjected || status.pageHookScriptLoaded);
   const captured = yesNo(status.capturedTargetApi);
+  const domFallback = yesNo(status.domFallbackCaptured);
   const parsed = yesNo(status.lastParseSuccess);
   const sent = yesNo(status.lastSendSuccess);
 
@@ -34,6 +35,7 @@ function render(status) {
   setText("content-heartbeat", timeText(status.contentHeartbeatAt), status.contentHeartbeatAt ? "good" : "");
   setText("page-hook", hook[0], hook[1]);
   setText("captured-api", captured[0], captured[1]);
+  setText("dom-fallback", domFallback[0], domFallback[1]);
   setText("parse-success", parsed[0], parsed[1]);
   setText("send-success", sent[0], sent[1]);
   setText("last-captured", timeText(status.lastCapturedAt));
@@ -65,14 +67,19 @@ function render(status) {
   renderSteps(status);
 
   const hint = document.getElementById("hint");
+  const hasLiveCapture = status.capturedTargetApi || status.domFallbackCaptured;
   if (!status.contentScriptInjected) {
     hint.textContent = "还没有注入页面。请确认当前页是 liveplatform.taobao.com，并刷新淘宝后台。";
     return;
   }
-  if (!status.capturedTargetApi) {
+  if (!hasLiveCapture) {
     hint.textContent = status.lastObservedApi
       ? "插件已注入，但还没抓到目标实时接口。已观察到其它接口：" + status.lastObservedApi + "。请截图发给开发者判断淘宝是否换接口。"
       : "插件已注入，但还没抓到目标 mtop 接口。请进入直播中控数据页，或刷新正在直播的数据页面。";
+    return;
+  }
+  if (status.domFallbackCaptured && !status.capturedTargetApi && status.lastSendSuccess) {
+    hint.textContent = "已用页面可见数据兜底采集并发送。当前可用成交额/在线/进入/点击；CTR/CVR 等精细指标仍需要真实接口。";
     return;
   }
   if (!status.lastParseSuccess) {
@@ -173,8 +180,12 @@ function renderSteps(status) {
   );
   setStep(
     "step-capture",
-    status.capturedTargetApi ? "done" : status.contentScriptInjected ? "active" : "",
-    status.capturedTargetApi ? "已捕获 Taobao mtop 实时接口" : "进入实时直播中控页，等待接口刷新"
+    status.capturedTargetApi || status.domFallbackCaptured ? "done" : status.contentScriptInjected ? "active" : "",
+    status.capturedTargetApi
+      ? "已捕获 Taobao mtop 实时接口"
+      : status.domFallbackCaptured
+      ? "已读取页面可见实时数据"
+      : "进入实时直播中控页，等待接口刷新"
   );
   setStep(
     "step-send",

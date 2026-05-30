@@ -35,7 +35,7 @@ Host workflow:
    - Ingest Token: the same value as `LIVE_INGEST_TOKEN`
 4. Open the Taobao live backend realtime data page while logged in.
 5. Click the extension icon and confirm:
-   `Content script = yes`, `Page hook = yes`, `Target API captured = yes`, `Sent to app = yes`.
+   `Content script = yes`, `Page hook = yes`, `Target API captured = yes` 或 `DOM fallback = yes`, `Sent to app = yes`.
 
 ## Local setup
 
@@ -102,11 +102,12 @@ Click the extension icon to see the connector status:
 - `Content script`: whether the extension injected into `liveplatform.taobao.com`
 - `Page hook`: whether response interception was installed
 - `Target API captured`: whether the target mtop API returned
+- `DOM fallback`: whether visible dashboard numbers were read from the page when Taobao did not expose the target API
 - `Payload parsed`: whether JSON/JSONP parsing succeeded
 - `Sent to app`: whether `POST /api/live-ingest` succeeded
 - `Last captured` / `Last sent`: timestamps for the latest successful steps
 
-If `Target API captured` is `no`, refresh or enter the Taobao live data console. If `Sent to app` is `no`, make sure the local FastAPI app is running on port `8000`.
+If both `Target API captured` and `DOM fallback` are `no`, refresh or enter the Taobao live data console. If `Sent to app` is `no`, make sure the local FastAPI app is running on port `8000` or the cloud API address is set correctly.
 
 Product-level metrics are prepared in the backend schema. If Taobao does not return them yet, the Live Director will show:
 

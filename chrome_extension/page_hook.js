@@ -1,12 +1,16 @@
 (() => {
   const TARGET_API = "mtop.taobao.tblive.portal.live.user.assistant.data.get";
   const SEND_INTERVAL_MS = 5000;
+  const DOM_FALLBACK_INTERVAL_MS = 5000;
+  const DOM_FALLBACK_STALE_MS = 30000;
   const DEFAULT_LIVE_ID = "default_live";
   const OBSERVED_API_LIMIT = 8;
   const metricsByLiveId = new Map();
   const observedApis = [];
   let latestPayload = null;
   let lastSentAt = 0;
+  let lastTargetCapturedAt = 0;
+  let lastDomFallbackAt = 0;
 
   const VALUE_TYPE_MAP = {
     uv: "uv",
@@ -217,6 +221,24 @@
     return value || DEFAULT_LIVE_ID;
   }
 
+  function escapeRegex(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function visibleNumberAfter(labels, text) {
+    for (const label of labels) {
+      const pattern = new RegExp(`${escapeRegex(label)}[^\\d¥￥-]{0,40}([¥￥]?\\s*[\\d,]+(?:\\.\\d+)?)`, "i");
+      const match = String(text || "").match(pattern);
+      if (match) return toNumber(match[1]);
+    }
+    return 0;
+  }
+
+  function visibleCurrentProduct(text) {
+    const match = String(text || "").match(/【[^】\n]{1,24}】[^\n]{4,90}/);
+    return match ? match[0].trim() : "";
+  }
+
   function assignKnownMetric(target, source, field, normalizer = toNumber) {
     const value = pick(source, field);
     if (value !== undefined) {
@@ -289,7 +311,7 @@
       room_id: current.room_id || previous.room_id || current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       liveId: current.liveId || previous.liveId || DEFAULT_LIVE_ID,
       timestamp: current.timestamp || new Date().toISOString(),
-      captured_api: TARGET_API,
+      captured_api: current.captured_api || previous.captured_api || TARGET_API,
       payload_sections: {
         ...(previous.payload_sections || {}),
         ...(current.payload_sections || {})
@@ -345,6 +367,7 @@
   function captureResponse(url, responseText) {
     rememberObservedApi(url);
     if (!String(url || "").includes(TARGET_API)) return;
+    lastTargetCapturedAt = Date.now();
     window.postMessage({
       type: "AI_LIVE_DIRECTOR_STATUS",
       payload: {
@@ -382,6 +405,65 @@
     }, "*");
   }
 
+  function captureDomFallback() {
+    if (Date.now() - lastDomFallbackAt < DOM_FALLBACK_INTERVAL_MS - 250) return false;
+    lastDomFallbackAt = Date.now();
+    const text = document.body && document.body.innerText ? document.body.innerText : "";
+    if (!text) return false;
+    const metrics = {};
+    const payAmt = visibleNumberAfter(["直播成交金额", "成交金额"], text);
+    const onlineUv = visibleNumberAfter(["在线人数", "当前在线人数"], text);
+    const productClicks = visibleNumberAfter(["商品点击次数", "商品点击数"], text);
+    const enterUv = visibleNumberAfter(["进入人数", "进房人数"], text);
+    const currentProduct = visibleCurrentProduct(text);
+
+    if (payAmt > 0) metrics.pay_amt = payAmt;
+    if (onlineUv > 0) metrics.online_uv = onlineUv;
+    if (productClicks > 0) metrics.pv = productClicks;
+    if (enterUv > 0) metrics.uv = enterUv;
+    if (currentProduct) metrics.current_product = currentProduct;
+
+    if (!Object.keys(metrics).some((key) => key !== "current_product" && metrics[key] > 0)) {
+      return false;
+    }
+
+    const liveId = liveIdFromUrl(location.href) || DEFAULT_LIVE_ID;
+    const current = {
+      source: "chrome_extension",
+      extension_version: "page_hook",
+      host_id: hostIdFromLiveId(liveId),
+      room_id: liveId,
+      liveId,
+      timestamp: new Date().toISOString(),
+      captured_api: "dom_live_dashboard",
+      payload_sections: {
+        domFallback: true,
+        totalStats: false,
+        dataRegion: false,
+        interactSecKill: false
+      },
+      metrics,
+      events: []
+    };
+    const merged = mergePayload(metricsByLiveId.get(liveId) || {}, current);
+    metricsByLiveId.set(liveId, merged);
+    latestPayload = merged;
+    window.postMessage({
+      type: "AI_LIVE_DIRECTOR_STATUS",
+      payload: {
+        domFallbackCaptured: true,
+        lastParseSuccess: true,
+        lastCapturedAt: Date.now(),
+        lastError: "",
+        liveId,
+        metricKeys: Object.keys(merged.metrics || {}),
+        payloadSections: merged.payload_sections || {},
+        eventCount: (merged.events || []).length
+      }
+    }, "*");
+    return true;
+  }
+
   const originalFetch = window.fetch;
   window.fetch = async (...args) => {
     const response = await originalFetch(...args);
@@ -412,6 +494,9 @@
   };
 
   window.setInterval(() => {
+    if (!lastTargetCapturedAt || Date.now() - lastTargetCapturedAt > DOM_FALLBACK_STALE_MS) {
+      captureDomFallback();
+    }
     if (!latestPayload || Date.now() - lastSentAt < SEND_INTERVAL_MS - 250) return;
     lastSentAt = Date.now();
     window.postMessage({ type: "AI_LIVE_DIRECTOR_METRICS", payload: latestPayload }, "*");

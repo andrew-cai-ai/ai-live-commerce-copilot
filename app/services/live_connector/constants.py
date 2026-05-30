@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.3")
+LATEST_EXTENSION_VERSION = os.getenv("LATEST_EXTENSION_VERSION", "0.1.4")
 MODEL_V0_MIN_CONFIDENCE = float(os.getenv("MODEL_V0_MIN_CONFIDENCE", "0.4"))
 
 _TREND_FIELDS = [
