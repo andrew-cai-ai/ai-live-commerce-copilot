@@ -34,6 +34,103 @@ def _apply_product_playbook(next_action: str, playbook: dict[str, Any], current_
     return next_action
 
 
+def _script_variant_index(snapshot: LiveMetricSnapshot, action_code: str, variants: int) -> int:
+    if variants <= 1:
+        return 0
+    seed = int(snapshot.timestamp // 25)
+    seed += int(snapshot.pay_amt // 500) + int(snapshot.online_uv // 10)
+    seed += sum(ord(char) for char in (snapshot.current_product or action_code)[:12])
+    return seed % variants
+
+
+def _playbook_sequence(playbook: dict[str, Any]) -> list[str]:
+    sequence = playbook.get("sequence") if isinstance(playbook, dict) else []
+    return [str(item).strip() for item in sequence if str(item).strip()] if isinstance(sequence, list) else []
+
+
+def _playbook_line(playbook: dict[str, Any], key: str, fallback: str) -> str:
+    value = str(playbook.get(key) or "").strip() if isinstance(playbook, dict) else ""
+    return value or fallback
+
+
+def _host_readable_sentence(
+    next_action: str,
+    action_code: str,
+    current_action: str,
+    snapshot: LiveMetricSnapshot,
+    playbook: dict[str, Any],
+    comment_clusters: dict[str, Any],
+) -> str:
+    """Return only words a host can read aloud; keep system reasoning in `reason`."""
+    if action_code == "A007" and ("数据不完整" in current_action or "No valid" in current_action):
+        return next_action
+
+    product = snapshot.current_product or "这件"
+    sequence = _playbook_sequence(playbook)
+    opening = _playbook_line(playbook, "opening", f"宝子们先看{product}适不适合自己，适合再拍。")
+    conversion_line = _playbook_line(playbook, "conversion_line", "合适的先锁，热门尺码等下不一定还有。")
+    online = int(snapshot.online_uv or 0)
+    has_sales = snapshot.pay_amt > 0 or snapshot.pay_amt_5min_d_live > 0 or snapshot.item_gmv > 0
+    sizing_count = 0
+    if isinstance(comment_clusters, dict):
+        clusters = comment_clusters.get("clusters") if isinstance(comment_clusters.get("clusters"), dict) else {}
+        sizing_count = int(clusters.get("尺码问题") or comment_clusters.get("尺码问题") or comment_clusters.get("sizing") or 0)
+
+    if action_code == "A001" or sizing_count > 0:
+        variants = [
+            "宝子们先把身高体重打出来，我按正常穿、里面加内搭、想宽松三种给你们对尺码。",
+            f"这件先别盲拍，尺码最重要。想贴身按平时码，里面要加一层就往大一码看。",
+            "刚问尺码的我先集中回，报身高体重和想修身还是宽松，我直接给你对号。",
+        ]
+        return variants[_script_variant_index(snapshot, action_code, len(variants))]
+
+    if action_code == "A002":
+        variants = [
+            "宝子们真假问题我直接给你看细节，镜头拉近看吊牌、洗标、拉链和走线。",
+            "正品别听我空口说，细节给你们看清楚，吊牌洗标和做工都过一遍。",
+            "担心真假的先别急，我把标、拉链和走线拉近给你们看，自己判断最踏实。",
+        ]
+        return variants[_script_variant_index(snapshot, action_code, len(variants))]
+
+    if action_code == "A006":
+        return "这件大家已经看得差不多了，我马上给你们上下一件更好抢的，想要这件的最后看一眼尺码。"
+
+    if action_code == "A005":
+        variants = [
+            f"{conversion_line} 现在别纠结参数，先看颜色和尺码，合适的直接锁。",
+            "这波不用听太多参数，重点看价格、颜色和尺码，合适就先拍，后面热门码不一定稳。",
+            f"已经有人在拍了，{sequence[-1] if sequence else '热门码'}先确认一下，能穿的别等到断码。",
+        ]
+        return variants[_script_variant_index(snapshot, action_code, len(variants))]
+
+    if action_code == "A004":
+        variants = [
+            f"{opening} 先别光看价格，看它是不是你能经常穿的场景。",
+            f"这件值不值，重点看使用频率。{conversion_line}",
+            "我不让你们盲拍，先看它能不能通勤、内搭或者日常反复穿，能穿上才值得。",
+        ]
+        return variants[_script_variant_index(snapshot, action_code, len(variants))]
+
+    if action_code == "A008" or "light push" in current_action.lower():
+        focus = sequence[_script_variant_index(snapshot, action_code, max(len(sequence), 1))] if sequence else "使用场景"
+        variants = [
+            f"{opening} {'现在还有' + str(online) + '人在看，' if online else ''}先看你适不适合这个场景。",
+            f"这件先看{focus}，{conversion_line}",
+            f"已经有人在看也有人在拍了，这件我先讲清楚{focus}，合适的再下单。",
+            f"这件不拉长参数，直接讲大家最关心的：{(' → '.join(sequence[:3]) if sequence else '场景、尺码、价格')}。",
+        ]
+        if has_sales:
+            variants.append(f"这件现在有成交，先别急着划走。我把{focus}讲清楚，能穿的再直接拍。")
+        return variants[_script_variant_index(snapshot, action_code, len(variants))]
+
+    if action_code == "A007":
+        return "宝子们想看上身扣 1，想问尺码直接打身高体重，我先按评论区问题讲。"
+
+    if "继续" in next_action or "continue" in current_action.lower():
+        return f"{opening} 我按{(' → '.join(sequence[:3]) if sequence else '场景、尺码、价格')}给你们快速过一遍。"
+    return next_action
+
+
 def _director_model_state(snapshot: LiveMetricSnapshot, comment_clusters: dict[str, Any]) -> dict[str, Any]:
     dna = infer_product_dna(snapshot.current_product or "当前商品", {
         "price": snapshot.item_gmv or snapshot.pay_amt_5min_d_live or snapshot.pay_amt,
@@ -370,7 +467,7 @@ def decide(
     elif snapshot.pay_amt > 0 and snapshot.online_uv > 0 and snapshot.heat_score <= 0:
         action_code = "A008"
         current_action = "continue with light push"
-        next_action = "页面兜底数据看到有成交和在线，先继续讲当前商品，轻推价格、尺码和使用场景，不要强切也不要猛逼单。"
+        next_action = "继续讲当前商品，轻推价格、尺码和使用场景。"
         reason = [
             f"页面可见成交额 ¥{int(snapshot.pay_amt)}",
             f"当前在线 {int(snapshot.online_uv)} 人",
@@ -381,7 +478,7 @@ def decide(
     elif snapshot.uv > 0 and snapshot.pv > 0 and snapshot.heat_score <= 0:
         action_code = "A004"
         current_action = "explain value"
-        next_action = "兜底数据看到有人进房和点击商品，先讲价格价值和使用场景，不要立刻切品。"
+        next_action = "讲价格价值和使用场景，先承接商品点击。"
         reason = [
             f"页面可见进房 {int(snapshot.uv)} 人",
             f"页面可见商品点击 {int(snapshot.pv)} 次",
@@ -466,6 +563,14 @@ def decide(
             reason = _top_metric_reasons(snapshot, trend_30s, trend_60s)
 
     next_action = _apply_product_playbook(next_action, product_playbook, current_action)
+    next_action = _host_readable_sentence(
+        next_action,
+        action_code,
+        current_action,
+        snapshot,
+        product_playbook,
+        comment_clusters,
+    )
 
     decision_warnings: list[str] = []
     used_model = bool(reason) and str(reason[0]).startswith("model_v0")

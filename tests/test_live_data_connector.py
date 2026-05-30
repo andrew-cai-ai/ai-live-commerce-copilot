@@ -133,7 +133,11 @@ class LiveDataConnectorTests(unittest.TestCase):
         self.assertLess(decision.confidence, 0.7)
         self.assertEqual(decision.livestream_mode, "有限实时数据模式")
         self.assertIn("页面可见成交额 ¥998", decision.reason)
-        self.assertIn("不要强切也不要猛逼单", decision.next_action)
+        self.assertRegex(decision.next_action, r"宝子|这件|已经")
+        self.assertNotIn("页面兜底", decision.next_action)
+        self.assertNotIn("不要", decision.next_action)
+        self.assertNotIn("不要强切", decision.next_action)
+        self.assertNotIn("猛逼单", decision.next_action)
         self.assertEqual(decision.snapshot.pay_amt, 998)
         self.assertEqual(decision.snapshot.current_product, "Kragg Cotton Shirt")
 
