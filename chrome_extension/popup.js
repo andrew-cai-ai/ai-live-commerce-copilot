@@ -52,6 +52,8 @@ function render(status) {
   setText("metric-keys", Array.isArray(status.metricKeys) && status.metricKeys.length ? status.metricKeys.join(", ") : "--");
   setText("event-count", String(status.eventCount ?? "--"));
   setText("endpoint", status.lastEndpoint || "--");
+  setText("observed-apis", Array.isArray(status.observedApis) && status.observedApis.length ? status.observedApis.slice(0, 4).join(", ") : "--");
+  setText("last-observed-api", status.lastObservedApi || "--", status.lastObservedApi ? "warn" : "");
   setText("active-tab", status.activeTabHost || "--", status.activeTabMatches ? "good" : status.activeTabHost ? "warn" : "");
   const manualStatus = manualInjectOverride || {
     status: status.manualInjectStatus || "--",
@@ -68,7 +70,9 @@ function render(status) {
     return;
   }
   if (!status.capturedTargetApi) {
-    hint.textContent = "插件已注入，但还没抓到目标 mtop 接口。请进入直播中控数据页，或刷新正在直播的数据页面。";
+    hint.textContent = status.lastObservedApi
+      ? "插件已注入，但还没抓到目标实时接口。已观察到其它接口：" + status.lastObservedApi + "。请截图发给开发者判断淘宝是否换接口。"
+      : "插件已注入，但还没抓到目标 mtop 接口。请进入直播中控数据页，或刷新正在直播的数据页面。";
     return;
   }
   if (!status.lastParseSuccess) {

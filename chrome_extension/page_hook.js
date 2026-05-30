@@ -2,7 +2,9 @@
   const TARGET_API = "mtop.taobao.tblive.portal.live.user.assistant.data.get";
   const SEND_INTERVAL_MS = 5000;
   const DEFAULT_LIVE_ID = "default_live";
+  const OBSERVED_API_LIMIT = 8;
   const metricsByLiveId = new Map();
+  const observedApis = [];
   let latestPayload = null;
   let lastSentAt = 0;
 
@@ -191,8 +193,23 @@
       || findValue(rawPayload, "live_id")
       || findValue(data, "liveId")
       || findValue(data, "live_id")
+      || liveIdFromUrl(location.href)
       || DEFAULT_LIVE_ID
     );
+  }
+
+  function liveIdFromUrl(url) {
+    try {
+      const parsed = new URL(String(url || ""), location.href);
+      return parsed.searchParams.get("liveId")
+        || parsed.searchParams.get("live_id")
+        || parsed.searchParams.get("roomId")
+        || parsed.searchParams.get("room_id")
+        || "";
+    } catch (_error) {
+      const match = String(url || "").match(/[?&](?:liveId|live_id|roomId|room_id)=([^&#]+)/);
+      return match ? safeDecode(match[1]) : "";
+    }
   }
 
   function hostIdFromLiveId(liveId) {
@@ -289,7 +306,44 @@
     };
   }
 
+  function observedApiName(url) {
+    const text = String(url || "");
+    if (!/mtop|tblive|liveplatform|\/live\//i.test(text)) return "";
+    try {
+      const parsed = new URL(text, location.href);
+      const api = parsed.searchParams.get("api");
+      if (api) return api;
+      const pathMatch = parsed.pathname.match(/(mtop\.[^/?]+)/i);
+      if (pathMatch) return pathMatch[1];
+      return parsed.hostname + parsed.pathname;
+    } catch (_error) {
+      const apiMatch = text.match(/[?&]api=([^&#]+)/i);
+      if (apiMatch) return safeDecode(apiMatch[1]);
+      const mtopMatch = text.match(/(mtop\.taobao\.[A-Za-z0-9_.-]+)/i);
+      return mtopMatch ? mtopMatch[1] : text.slice(0, 120);
+    }
+  }
+
+  function rememberObservedApi(url) {
+    const api = observedApiName(url);
+    if (!api) return;
+    const existing = observedApis.indexOf(api);
+    if (existing >= 0) observedApis.splice(existing, 1);
+    observedApis.unshift(api);
+    observedApis.splice(OBSERVED_API_LIMIT);
+    window.postMessage({
+      type: "AI_LIVE_DIRECTOR_STATUS",
+      payload: {
+        observedApis: observedApis.slice(),
+        lastObservedApi: api,
+        lastObservedUrl: String(url || "").slice(0, 220),
+        liveId: liveIdFromUrl(location.href) || ""
+      }
+    }, "*");
+  }
+
   function captureResponse(url, responseText) {
+    rememberObservedApi(url);
     if (!String(url || "").includes(TARGET_API)) return;
     window.postMessage({
       type: "AI_LIVE_DIRECTOR_STATUS",
@@ -320,7 +374,7 @@
       payload: {
         lastParseSuccess: true,
         lastError: "",
-        liveId,
+      liveId,
         metricKeys: Object.keys(merged.metrics || {}),
         payloadSections: merged.payload_sections || {},
         eventCount: (merged.events || []).length
@@ -333,6 +387,7 @@
     const response = await originalFetch(...args);
     try {
       const url = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
+      rememberObservedApi(url);
       if (String(url).includes(TARGET_API)) {
         response.clone().text().then((text) => captureResponse(url, text)).catch(() => {});
       }
@@ -344,6 +399,7 @@
   const originalSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function patchedOpen(method, url, ...rest) {
     this.__aiLiveDirectorUrl = url;
+    rememberObservedApi(url);
     return originalOpen.call(this, method, url, ...rest);
   };
   XMLHttpRequest.prototype.send = function patchedSend(...args) {
@@ -366,7 +422,8 @@
     payload: {
       pageHookInjected: true,
       injectedAt: Date.now(),
-      targetApi: TARGET_API
+      targetApi: TARGET_API,
+      liveId: liveIdFromUrl(location.href) || ""
     }
   }, "*");
 })();
