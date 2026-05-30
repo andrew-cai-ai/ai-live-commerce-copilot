@@ -1128,6 +1128,7 @@ def _render_live_console() -> str:
       if (text.includes("closing")) return "收口成交模式";
       if (text.includes("dropping")) return "流量下滑模式";
       if (text.includes("growth")) return "流量上涨模式";
+      if (text.includes("limited") || text.includes("有限")) return "有限实时数据模式";
       if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
       return mode || "实时导演模式";
     }
@@ -1740,6 +1741,7 @@ def _render_live_prompter() -> str:
       if (text.includes("closing")) return "收口成交模式";
       if (text.includes("dropping")) return "流量下滑模式";
       if (text.includes("growth")) return "流量上涨模式";
+      if (text.includes("limited") || text.includes("有限")) return "有限实时数据模式";
       if (text.includes("waiting") || text.includes("no valid")) return "等待数据模式";
       return mode || "实时导演模式";
     }

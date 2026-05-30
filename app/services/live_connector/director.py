@@ -370,23 +370,23 @@ def decide(
         current_action = "push harder"
         next_action = "兜底数据已经看到成交和在线，先承接成交势能，强调库存、尺码和现在下单。"
         reason = [
-            f"visible pay_amt ¥{int(snapshot.pay_amt)}",
-            f"visible online_uv {int(snapshot.online_uv)}",
-            "limited DOM fallback metrics",
+            f"页面可见成交额 ¥{int(snapshot.pay_amt)}",
+            f"当前在线 {int(snapshot.online_uv)} 人",
+            "当前为页面兜底数据，精细 CTR/CVR 待接口补齐",
         ]
         confidence = 0.62
-        livestream_mode = "Limited live data mode"
+        livestream_mode = "有限实时数据模式"
     elif snapshot.uv > 0 and snapshot.pv > 0 and snapshot.heat_score <= 0:
         action_code = "A004"
         current_action = "explain value"
         next_action = "兜底数据看到有人进房和点击商品，先讲价格价值和使用场景，不要立刻切品。"
         reason = [
-            f"visible uv {int(snapshot.uv)}",
-            f"visible product clicks {int(snapshot.pv)}",
-            "limited DOM fallback metrics",
+            f"页面可见进房 {int(snapshot.uv)} 人",
+            f"页面可见商品点击 {int(snapshot.pv)} 次",
+            "当前为页面兜底数据，精细 CTR/CVR 待接口补齐",
         ]
         confidence = 0.58
-        livestream_mode = "Limited live data mode"
+        livestream_mode = "有限实时数据模式"
     elif trend_30s["online_uv"] == "up" and trend_30s["heat_score"] == "up" and trend_30s["pay_amt"] == "up":
         action_code = "A005"
         current_action = "continue product"
