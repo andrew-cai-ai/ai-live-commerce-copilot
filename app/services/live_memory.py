@@ -19,7 +19,7 @@ DEFAULT_PLAYBOOKS: list[dict[str, Any]] = [
         "name": "Kragg / T恤打法",
         "best_for": "通勤、日常、想买始祖鸟但不想上高价外套的客户",
         "sequence": ["尺码", "面料", "价格", "颜色库存"],
-        "opening": "哥几个这件别当普通T看，平时通勤穿最不容易吃灰。",
+        "opening": "宝子们这件别当普通T看，平时通勤穿最不容易吃灰。",
         "conversion_line": "尺码合适的先锁，T恤这种价格段最容易断码。",
         "avoid": "不要长时间讲户外参数，先把尺码和价格讲清楚。",
     },
@@ -47,7 +47,7 @@ DEFAULT_PLAYBOOKS: list[dict[str, Any]] = [
         "best_for": "要轻、要暖、要能压缩收纳的客户",
         "sequence": ["保暖重量", "适合温度", "尺码", "价格价值"],
         "opening": "这件重点不是厚，是轻，而且保暖效率高。",
-        "conversion_line": "哥几个，怕冷但不想穿得像个球的重点看这件，轻、暖、日常通勤都能穿。",
+        "conversion_line": "宝子们，怕冷但不想穿得臃肿的重点看这件，轻、暖、日常通勤都能穿。",
         "avoid": "不要承诺极寒万能，要讲地区、内搭和温度边界。",
     },
     {
@@ -83,7 +83,7 @@ DEFAULT_PLAYBOOKS: list[dict[str, Any]] = [
         "best_for": "通勤走路多、户外轻徒步、想要折扣鞋的客户",
         "sequence": ["尺码脚型", "场景", "鞋底/防水", "价格"],
         "opening": "鞋先别急着拍，先把尺码脚型说清楚，合适再下单。",
-        "conversion_line": "脚型合适的再冲，鞋子最怕买错码。",
+        "conversion_line": "脚型合适的再下单，鞋子最怕买错码。",
         "avoid": "不要先逼单，鞋类先解决尺码和脚型信任。",
     },
 ]
@@ -217,7 +217,7 @@ def _default_playbook(product_name: str) -> dict[str, Any]:
             "name": "通用商品打法",
             "best_for": "对价格、尺码和使用场景还在犹豫的客户",
             "sequence": ["适合谁", "尺码/场景", "价格价值", "库存"],
-            "opening": "哥几个先看适不适合自己，适合再拍。",
+            "opening": "宝子们先看适不适合自己，适合再拍。",
             "conversion_line": "别光看价格，关键是买回去会不会常穿。",
             "avoid": "不要一直讲参数，先解决尺码、真假和价格顾虑。",
         }

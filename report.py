@@ -1775,7 +1775,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
 
       function nextHostSentence(decision, metrics) {
         if (decision === "Switch product") {
-          return "这件先放一下，哥几个我们切下一件更好成交的。";
+          return "这件先放一下，宝子们我们切下一件更好成交的。";
         }
         if (decision === "Explain sizing") {
           return "很多人点进来看了，我先把尺码和上身效果讲清楚。";
@@ -2523,7 +2523,7 @@ def _live_mode_script(products: list[ScoredProduct]) -> str:
         if (/冬天|够暖|保暖|冷/.test(text)) {
           return { reply: "冬天够不够暖看地区，通勤没问题，特别冷里面加抓绒。", confidence: "82%", action: "Explain warmth" };
         }
-        return { reply: "这个问题我先记一下，哥几个继续看细节，有具体尺码直接打出来。", confidence: "55%", action: "Ask follow-up" };
+        return { reply: "这个问题我先记一下，宝子们继续看细节，有具体尺码直接打出来。", confidence: "55%", action: "Ask follow-up" };
       }
 
       function updateLiveCommentAssistant() {

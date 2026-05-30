@@ -1208,12 +1208,12 @@ def _render_live_console() -> str:
       const text = String(action || "").toLowerCase();
       const fallback = String(nextAction || "");
       if (fallback.includes("按商品打法")) return fallback;
-      if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
+      if (text.includes("switch")) return "宝子们这件先过，我们切下一件更好成交的。";
       if (text.includes("value")) return fallback || "别光看价格，平时通勤能穿，买回去不会吃灰。";
       if (text.includes("sizing")) return fallback || "175/70 正常 M，里面加卫衣建议 L。";
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
       if (text.includes("push")) return fallback || "现在已经有人在下单了，尺码合适的先锁。";
-      return fallback || "哥几个看一下，这件现在数据还不错，先继续讲 30 秒。";
+      return fallback || "宝子们看一下，这件现在数据还不错，先继续讲 30 秒。";
     }
     function updateVoiceButtons() {
       ["voice-toggle", "voice-toggle-sticky"].forEach((id) => {
@@ -1754,12 +1754,12 @@ def _render_live_prompter() -> str:
     function sentenceFor(action, fallback) {
       const text = String(action || "").toLowerCase();
       if (text.includes("no valid")) return "先别乱切品，等插件数据进来再判断。";
-      if (text.includes("switch")) return "哥几个这件先过，我们切下一件更好成交的。";
+      if (text.includes("switch")) return "宝子们这件先过，我们切下一件更好成交的。";
       if (text.includes("value") || text.includes("price")) return "别光看价格，平时通勤能穿，买回去不会吃灰。";
       if (text.includes("sizing")) return "175/70 正常 M，里面加卫衣建议 L。";
       if (text.includes("authenticity")) return "镜头拉近看吊牌和洗标，细节我直接给你看。";
       if (text.includes("push")) return "现在已经有人在下单了，尺码合适的先锁。";
-      return fallback || "哥几个看一下，这件再讲 30 秒，看数据能不能继续顶上去。";
+      return fallback || "宝子们看一下，这件再讲 30 秒，看数据能不能继续顶上去。";
     }
     function updateVoiceButton() {
       const button = document.getElementById("voice-toggle");

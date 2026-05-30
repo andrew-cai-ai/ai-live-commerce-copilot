@@ -55,7 +55,7 @@ def answer_audience_question(comment: str) -> AudienceQuestionResponse:
 
     return AudienceQuestionResponse(
         comment,
-        "这个问题我先记一下，哥几个继续看细节，有具体尺码和场景直接打出来。",
+        "这个问题我先记一下，宝子们继续看细节，有具体尺码和场景直接打出来。",
         0.55,
         "Ask follow-up",
     )
