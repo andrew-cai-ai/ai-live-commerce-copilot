@@ -25,6 +25,7 @@ from app.services.auth import (
     require_api_auth,
     set_auth_cookie,
 )
+from app.services.ecc_live_quality import capability_surface, inventory_quality_gate
 from app.services.inventory_import import (
     SmartInventoryRow,
     build_inventory_items,
@@ -86,6 +87,14 @@ def index(request: Request) -> str:
     if not is_authenticated(request):
         return _render_login_form()
     return _render_form()
+
+
+@app.get("/api/ecc/capabilities")
+def ecc_capabilities() -> dict[str, Any]:
+    return {
+        "schema": "ecc_live_capabilities_v1",
+        "surface": capability_surface(),
+    }
 
 
 @app.get("/reports", response_class=HTMLResponse)
@@ -926,6 +935,13 @@ def _render_live_console() -> str:
     .boss-alert { display: none; border: 1px solid rgba(161, 98, 7, .32); background: #fffbeb; color: var(--warn); border-radius: 10px; padding: 12px; margin-bottom: 14px; font-size: 17px; font-weight: 900; }
     .boss-alert.show { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .boss-alert button { background: var(--warn); color: #fff; white-space: nowrap; }
+    .setup-banner { display: flex; justify-content: space-between; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; background: #fff; }
+    .setup-banner b { display: block; font-size: 18px; }
+    .setup-banner.warn { border-color: rgba(161, 98, 7, .35); background: #fffbeb; color: #713f12; }
+    .setup-banner.good { border-color: rgba(12, 107, 88, .24); background: #eef8f3; color: var(--accent); }
+    .setup-banner .setup-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .setup-banner .setup-actions a, .setup-banner .setup-actions button { border-radius: 8px; padding: 10px 12px; background: var(--accent); color: #fff; font-weight: 900; }
+    .setup-banner .setup-actions button { border: 0; }
     @media (max-width: 900px) { .cards, .director-strip, .execution-grid, .switch-metrics { grid-template-columns: 1fr; } .action { font-size: 42px; } .sentence { font-size: 28px; } .primary-action { width: 100%; } }
   </style>
 </head>
@@ -941,6 +957,16 @@ def _render_live_console() -> str:
     <section class="boss-alert" id="boss-alert">
       <div id="boss-alert-message">等待人工提醒</div>
       <button id="boss-alert-ack" type="button">收到</button>
+    </section>
+    <section class="setup-banner warn" id="inventory-setup-banner">
+      <div>
+        <b id="inventory-setup-title">先上传今日 Excel 货盘</b>
+        <div class="small" id="inventory-setup-body">Live Director 只应该从今天的 Excel 商品池里推荐。未上传前，系统只能看直播数据，不能可靠指挥切品。</div>
+      </div>
+      <div class="setup-actions">
+        <a id="inventory-setup-link" href="/">上传 / 更新货盘</a>
+        <button id="reload-product-pool" type="button">重新检查</button>
+      </div>
     </section>
     <section class="layout">
       <div>
@@ -1121,13 +1147,44 @@ def _render_live_console() -> str:
         return parts.filter(Boolean).join(" | ");
       }).filter(Boolean).join("\\n");
     }
+    function inventorySetupUrl() {
+      return workspaceId ? "/?workspace_id=" + encodeURIComponent(workspaceId) : "/";
+    }
+    function renderInventorySetup(data) {
+      const banner = document.getElementById("inventory-setup-banner");
+      const title = document.getElementById("inventory-setup-title");
+      const body = document.getElementById("inventory-setup-body");
+      const link = document.getElementById("inventory-setup-link");
+      if (!banner || !title || !body || !link) return;
+      const count = Number((data && data.count) || ((data && data.products) || []).length || 0);
+      const workspace = (data && data.workspace_id) || workspaceId || "default";
+      link.href = inventorySetupUrl();
+      if (count > 0) {
+        banner.classList.remove("warn");
+        banner.classList.add("good");
+        title.textContent = "今日 Excel 货盘已连接：" + count + " 件";
+        body.textContent = "工作区：" + workspace + "。直播推荐和切品只从这个货盘里出；淘宝标题只用来识别当前正在讲哪一件。";
+        link.textContent = "更新货盘";
+        return;
+      }
+      banner.classList.remove("good");
+      banner.classList.add("warn");
+      title.textContent = "先上传今日 Excel 货盘";
+      body.textContent = "工作区：" + workspace + "。未上传前不要让主播按推荐切品，先让老板上传 Ashley Arcteryx.xlsx 或今日货盘。";
+      link.textContent = "上传 Excel 货盘";
+    }
     async function refreshProductPool() {
       try {
         const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
         const response = await fetch("/api/live/product-pool" + query);
         const data = await response.json();
         const list = Array.isArray(data.products) ? data.products : [];
-        if (!list.length) return;
+        renderInventorySetup(data);
+        if (!list.length) {
+          serverProductPool = [];
+          updateChecklist();
+          return;
+        }
         serverProductPool = list;
         const input = document.getElementById("product-list");
         const currentText = (input.value || "").trim();
@@ -1139,7 +1196,9 @@ def _render_live_console() -> str:
         products = productsFromInput();
         renderProductCards();
         updateChecklist();
-      } catch (_error) {}
+      } catch (_error) {
+        renderInventorySetup({ products: [], workspace_id: workspaceId || "default" });
+      }
     }
     function productsFromInput() {
       const input = document.getElementById("product-list");
@@ -1207,7 +1266,7 @@ def _render_live_console() -> str:
       return String(text || "")
         .replace(/totalStats\\s*\\/\\s*插件补齐/g, "完整实时指标 / 插件补齐")
         .replace(/totalStats/g, "完整实时指标")
-        .replace(/等待\s+完整实时指标/g, "等待完整实时指标");
+        .replace(/等待\\s+完整实时指标/g, "等待完整实时指标");
     }
     function directorPlan(action, nextProduct) {
       const text = String(action || "").toLowerCase();
@@ -1622,6 +1681,7 @@ def _render_live_console() -> str:
     document.getElementById("voice-replay").addEventListener("click", replayVoice);
     document.getElementById("voice-replay-sticky").addEventListener("click", replayVoice);
     document.getElementById("boss-alert-ack").addEventListener("click", ackBossIntervention);
+    document.getElementById("reload-product-pool").addEventListener("click", () => { refreshProductPool().then(() => refreshDecision()); });
     document.addEventListener("keydown", (event) => {
       const target = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : "";
       if (target === "input" || target === "textarea") return;
@@ -1699,6 +1759,10 @@ def _render_live_prompter() -> str:
     .boss-alert button { background: #fde68a; color: #713f12; border: 0; white-space: nowrap; font-size: 16px; font-weight: 950; }
     .mode-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; background: rgba(94, 234, 212, .10); color: var(--accent); border: 1px solid var(--line); font-weight: 950; }
     .action-code-pill { display: inline-flex; width: fit-content; border-radius: 999px; padding: 8px 12px; margin-left: 8px; background: rgba(99, 102, 241, .12); color: #c7d2fe; border: 1px solid rgba(99, 102, 241, .35); font-weight: 900; font-size: 14px; letter-spacing: .04em; }
+    .inventory-status { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: rgba(255,255,255,.035); }
+    .inventory-status.good { border-color: rgba(94, 234, 212, .45); background: rgba(94, 234, 212, .08); }
+    .inventory-status.warn { border-color: rgba(251, 191, 36, .48); background: rgba(251, 191, 36, .10); color: #fde68a; }
+    .inventory-status b { display: block; font-size: 20px; margin-bottom: 6px; }
     @media (max-width: 1000px) { .stage { grid-template-columns: 1fr; } .side { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 720px) { main { width: calc(100vw - 20px); } header { align-items: flex-start; } .side { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: 1fr 1fr; } .action { font-size: 56px; } .sentence { font-size: 34px; } }
   </style>
@@ -1748,6 +1812,14 @@ def _render_live_prompter() -> str:
           <div class="status-line"><span>Host</span><b id="host-id-label">default</b></div>
           <div class="status-line"><span>更新</span><b id="last-updated">--</b></div>
           <div class="status-line"><span>模式</span><b id="mode-label">真实</b></div>
+        </section>
+        <section class="panel">
+          <span class="label">今日货盘</span>
+          <div class="inventory-status warn" id="prompter-inventory-status">
+            <b id="prompter-inventory-title">未确认</b>
+            <div class="tiny" id="prompter-inventory-body">先让老板上传今天的 Excel 货盘，再开始按 AI 切品。</div>
+          </div>
+          <div class="tiny" style="margin-top:10px;"><a id="prompter-inventory-link" href="/">上传 / 更新货盘</a></div>
         </section>
         <section class="panel">
           <span class="label">直播指标</span>
@@ -1801,12 +1873,39 @@ def _render_live_prompter() -> str:
         return parts[0] ? { name: parts[0], raw: line, score: 1 - index * 0.01, inventory: 1, profit_margin: 0 } : null;
       }).filter(Boolean).slice(0, 50);
     }
+    function inventorySetupUrl() {
+      return workspaceId ? "/?workspace_id=" + encodeURIComponent(workspaceId) : "/";
+    }
+    function renderInventoryStatus(data) {
+      const status = document.getElementById("prompter-inventory-status");
+      const title = document.getElementById("prompter-inventory-title");
+      const body = document.getElementById("prompter-inventory-body");
+      const link = document.getElementById("prompter-inventory-link");
+      if (!status || !title || !body || !link) return;
+      const count = Number((data && data.count) || ((data && data.products) || []).length || 0);
+      const workspace = (data && data.workspace_id) || workspaceId || "default";
+      link.href = inventorySetupUrl();
+      if (count > 0) {
+        status.classList.remove("warn");
+        status.classList.add("good");
+        title.textContent = "已连接 " + count + " 件";
+        body.textContent = "工作区：" + workspace + "。AI 只从今日 Excel 货盘推荐商品。";
+        link.textContent = "更新货盘";
+        return;
+      }
+      status.classList.remove("good");
+      status.classList.add("warn");
+      title.textContent = "未上传今日货盘";
+      body.textContent = "先让老板上传 Excel，否则只能看直播数据，不能可靠切品。";
+      link.textContent = "上传 Excel 货盘";
+    }
     async function refreshProductPool() {
       try {
         const query = workspaceId ? "?workspace_id=" + encodeURIComponent(workspaceId) : "";
         const response = await fetch("/api/live/product-pool" + query);
         const data = await response.json();
         const list = Array.isArray(data.products) ? data.products : [];
+        renderInventoryStatus(data);
         if (list.length) {
           liveProductPool = list;
           localStorage.setItem("ai_live_products_source", "server");
@@ -1816,8 +1915,12 @@ def _render_live_prompter() -> str:
             if (product.category) parts.push(product.category);
             return parts.filter(Boolean).join(" | ");
           }).filter(Boolean).join("\\n"));
+        } else {
+          liveProductPool = [];
         }
-      } catch (_error) {}
+      } catch (_error) {
+        renderInventoryStatus({ products: [], workspace_id: workspaceId || "default" });
+      }
     }
     function fmtNumber(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? Math.round(numeric).toLocaleString("zh-CN") : "--"; }
     function fmtMoney(value) { const numeric = Number(value || 0); return Number.isFinite(numeric) && numeric ? "¥" + Math.round(numeric).toLocaleString("zh-CN") : "--"; }
@@ -1862,7 +1965,7 @@ def _render_live_prompter() -> str:
       return String(text || "")
         .replace(/totalStats\\s*\\/\\s*插件补齐/g, "完整实时指标 / 插件补齐")
         .replace(/totalStats/g, "完整实时指标")
-        .replace(/等待\s+完整实时指标/g, "等待完整实时指标");
+        .replace(/等待\\s+完整实时指标/g, "等待完整实时指标");
     }
     function actionTone(action) {
       const text = String(action || "").toLowerCase();
@@ -2917,6 +3020,18 @@ def _render_admin_live_detail(host_id: str) -> str:
 def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> str:
     if not rows:
         return ""
+    gate = inventory_quality_gate(rows)
+    checks = "".join(
+        f"<li><b>{html.escape(check['name'])}</b>: {html.escape(check['status'])} - {html.escape(check['detail'])}</li>"
+        for check in gate.get("checks", [])
+    )
+    gate_html = f"""
+      <div class="notice">
+        ECC Import Gate: {html.escape(str(gate.get("decision", "")))} / {html.escape(str(gate.get("score", 0)))}/100
+        <div class="hint">{html.escape(str(gate.get("reason", "")))} 下一步：{html.escape(str(gate.get("next_action", "")))}</div>
+        <ul class="hint">{checks}</ul>
+      </div>
+    """
     preview_rows = "".join(
         f"""
         <tr>
@@ -2935,6 +3050,7 @@ def _render_inventory_preview(rows: list[SmartInventoryRow], message: str) -> st
     notice = f'<div class="notice">{html.escape(message)}</div>' if message else ""
     return f"""
       {notice}
+      {gate_html}
       <div class="preview">
         <table>
           <thead>

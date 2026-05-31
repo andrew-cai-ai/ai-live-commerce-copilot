@@ -92,6 +92,14 @@ The upload flow supports `.xlsx` and `.csv` files. Click **预览 Excel/CSV** fi
 
 Only `product_name` is required. Other fields may be blank.
 
+The preview now includes an ECC-style **Import Gate**:
+
+- `Promote`: strong enough to feed the live product pool.
+- `Watchlist`: usable, but missing fields should be fixed before an important stream.
+- `Blocked`: too weak for reliable live-room recommendations.
+
+The gate checks product coverage, SKU coverage, target price coverage, cost confidence, livestream notes, and inventory evidence. Ashley-style sheets where inventory is described in ERP/official-site notes can still pass, but the gate will warn that numeric inventory is missing.
+
 Column headers are mapped by keywords:
 
 - `商品名 / 品名 / product / title / name` -> `product_name`
@@ -200,6 +208,12 @@ The report includes a Post-Live Analysis section with total viewers, estimated G
 ## Chrome Extension Connector
 
 The Chrome extension is in `chrome_extension/`. It captures Taobao live assistant responses from the user's logged-in browser session and sends normalized metrics to the app every 5 seconds.
+
+The extension popup includes an ECC-style **Link Gate**:
+
+- `Ready`: Taobao page, script injection, capture, parsing, and backend ingest are all working.
+- `Partial`: some live data is flowing, but at least one gate needs attention.
+- `Blocked`: do not trust realtime director decisions yet.
 
 The cloud app exposes an authenticated download link:
 

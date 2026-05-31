@@ -30,6 +30,7 @@ function render(status) {
   const domFallback = yesNo(status.domFallbackCaptured);
   const parsed = yesNo(status.lastParseSuccess);
   const sent = yesNo(status.lastSendSuccess);
+  const eccGate = eccLinkGate(status);
 
   setText("content-script", content[0], content[1]);
   setText("content-heartbeat", timeText(status.contentHeartbeatAt), status.contentHeartbeatAt ? "good" : "");
@@ -38,6 +39,7 @@ function render(status) {
   setText("dom-fallback", domFallback[0], domFallback[1]);
   setText("parse-success", parsed[0], parsed[1]);
   setText("send-success", sent[0], sent[1]);
+  setText("ecc-link-gate", eccGate.label, eccGate.className);
   setText("last-captured", timeText(status.lastCapturedAt));
   setText("last-sent", timeText(status.lastSentAt));
   setText("host-id", status.hostId || status.liveId || "--");
@@ -98,6 +100,25 @@ function render(status) {
     return;
   }
   hint.textContent = "链路已通。回到本地报告页，Payload source 应显示 extension。";
+}
+
+function eccLinkGate(status) {
+  const checks = [
+    Boolean(status.activeTabMatches),
+    Boolean(status.contentScriptInjected && (status.pageHookInjected || status.pageHookScriptLoaded)),
+    Boolean(status.capturedTargetApi || status.domFallbackCaptured),
+    Boolean(status.lastParseSuccess),
+    Boolean(status.lastSendSuccess)
+  ];
+  const workspaceBound = Boolean(String(status.workspaceId || "").trim());
+  const score = Math.min(100, checks.reduce((total, ok) => total + (ok ? 18 : 0), workspaceBound ? 10 : 4));
+  if (score >= 90 && checks.every(Boolean)) {
+    return { label: `Ready ${score}/100`, className: "good" };
+  }
+  if (score >= 55) {
+    return { label: `Partial ${score}/100`, className: "warn" };
+  }
+  return { label: `Blocked ${score}/100`, className: "bad" };
 }
 
 function loadWorkspaceConfig() {

@@ -105,6 +105,7 @@ The parser maps metrics only by exact `valueType`. For example, `uv` becomes tot
 
 Click the extension icon to see the connector status:
 
+- `ECC Link Gate`: overall readiness score for the live connector
 - `Content script`: whether the extension injected into the Taobao live control or professional screen page
 - `Page hook`: whether response interception was installed
 - `Target API captured`: whether the target mtop API returned
@@ -118,3 +119,5 @@ If both `Target API captured` and `DOM fallback` are `no`, refresh or enter the 
 Product-level metrics are prepared in the backend schema. If Taobao does not return them yet, the Live Director will show:
 
 `Product-level metrics not connected yet.`
+
+`ECC Link Gate = Ready` means page detection, injection, capture, parsing, and backend ingest are all working. `Partial` means the stream is partially connected; `Blocked` means do not trust realtime director decisions yet.
